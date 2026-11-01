@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 620" role="img" aria-labelledby="title desc">
+  <title id="title">Ouryn primary logo lockup</title>
+  <desc id="desc">The Ouryn open O symbol, wordmark, and Your Money. Yours. tagline.</desc>
+  <defs>
+    <linearGradient id="silver" x1="76" y1="54" x2="255" y2="265" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fcfcfc"/>
+      <stop offset="0.16" stop-color="#c6c6c8"/>
+      <stop offset="0.34" stop-color="#ffffff"/>
+      <stop offset="0.58" stop-color="#e6e6e7"/>
+      <stop offset="0.81" stop-color="#a6a6aa"/>
+      <stop offset="1" stop-color="#f4f4f5"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="104" y1="45" x2="247" y2="259" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.9"/>
+      <stop offset="0.5" stop-color="#f7f7f8" stop-opacity="0"/>
+      <stop offset="1" stop-color="#55555a" stop-opacity="0.62"/>
+    </linearGradient>
+    <radialGradient id="dot" cx="33%" cy="28%" r="78%">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.42" stop-color="#f7f7f8"/>
+      <stop offset="1" stop-color="#b9b9bd"/>
+    </radialGradient>
+    <linearGradient id="word-silver" x1="0" y1="330" x2="0" y2="510" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.6" stop-color="#f2f2f3"/>
+      <stop offset="1" stop-color="#c9c9cd"/>
+    </linearGradient>
+    <filter id="depth" x="-20%" y="-20%" width="150%" height="160%" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1.2" result="blur"/>
+      <feOffset in="blur" dx="0" dy="1.5" result="offset"/>
+      <feColorMatrix in="offset" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.16 0" result="shadow"/>
+      <feMerge>
+        <feMergeNode in="shadow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <g id="open-o" filter="url(#depth)">
+      <path d="M203.7 69.8A102 102 0 1 0 262 160" fill="none" stroke="url(#silver)" stroke-width="40" stroke-linecap="round"/>
+      <path d="M203.7 69.8A102 102 0 1 0 262 160" fill="none" stroke="url(#rim)" stroke-width="3" stroke-linecap="round" opacity="0.48"/>
+      <circle cx="248" cy="102" r="20" fill="url(#dot)"/>
+      <circle cx="248" cy="102" r="20" fill="none" stroke="#ffffff" stroke-opacity="0.2"/>
+    </g>
+    <g id="ouryn-word" transform="scale(0.89 1)" fill="#f1f1f2">
+      <path d="M800 355Q800 273 771.5 204.5Q743 136 693 86.5Q643 37 574 9.5Q505 -18 424 -18Q343 -18 274.5 9.5Q206 37 156 86.5Q106 136 78 204.5Q50 273 50 355Q50 438 78 506.5Q106 575 156 623.5Q206 672 274.5 699Q343 726 424 726Q505 726 574 699Q643 672 693 623.5Q743 575 771.5 506.5Q800 438 800 355ZM693 355Q693 413 674 464.5Q655 516 620 555Q585 594 535.5 616.5Q486 639 424 639Q363 639 313.5 616.5Q264 594 229.5 555Q195 516 176 464.5Q157 413 157 355Q157 296 176 244Q195 192 230 153.5Q265 115 314 93Q363 71 424 71Q485 71 535 93Q585 115 620 153.5Q655 192 674 244Q693 296 693 355Z"/>
+      <path transform="translate(849 0)" d="M415 0Q413 18 412 40.5Q411 63 411 78H409Q391 40 348.5 13.5Q306 -13 254 -13Q208 -13 174.5 2Q141 17 119.5 43.5Q98 70 87.5 105Q77 140 77 180V474H171V212Q171 183 175.5 156.5Q180 130 192 110Q204 90 225 78Q246 66 279 66Q336 66 371 108.5Q406 151 406 222V474H500V102Q500 83 501 53Q502 23 504 0Z"/>
+      <path transform="translate(1431 0)" d="M81 372Q81 391 80 421Q79 451 77 474H166Q168 456 169 432.5Q170 409 170 394H173Q193 436 231.5 461.5Q270 487 318 487Q340 487 355 483L351 396Q331 401 308 401Q274 401 249 388.5Q224 376 207.5 355Q191 334 183 306.5Q175 279 175 249V0H81V372Z"/>
+      <path transform="translate(1793 0)" d="M261 102H263L394 474H494L264 -112Q252 -142 238 -165.5Q224 -189 205 -205.5Q186 -222 160.5 -231Q135 -240 100 -240Q85 -240 69.5 -238.5Q54 -237 38 -233L47 -150Q71 -158 94 -158Q131 -158 149 -137.5Q167 -117 182 -79L212 0L9 474H114Z"/>
+      <path transform="translate(2297 0)" d="M166 474Q168 456 169 433.5Q170 411 170 396H173Q182 415 197.5 431.5Q213 448 233 460.5Q253 473 277 480Q301 487 327 487Q373 487 406 471.5Q439 456 461 430Q483 404 493.5 369Q504 334 504 294V0H410V263Q410 292 405.5 318Q401 344 389 364Q377 384 356 396Q335 408 302 408Q246 408 210.5 365.5Q175 323 175 252V0H81V372Q81 391 80 421Q79 451 77 474Z"/>
+    </g>
+    <path id="tag-y" d="M362 0H262V306L-3 708H119L315 388L512 708H627L362 306Z"/>
+    <path id="tag-o" d="M800 355Q800 273 771.5 204.5Q743 136 693 86.5Q643 37 574 9.5Q505 -18 424 -18Q343 -18 274.5 9.5Q206 37 156 86.5Q106 136 78 204.5Q50 273 50 355Q50 438 78 506.5Q106 575 156 623.5Q206 672 274.5 699Q343 726 424 726Q505 726 574 699Q643 672 693 623.5Q743 575 771.5 506.5Q800 438 800 355ZM693 355Q693 413 674 464.5Q655 516 620 555Q585 594 535.5 616.5Q486 639 424 639Q363 639 313.5 616.5Q264 594 229.5 555Q195 516 176 464.5Q157 413 157 355Q157 296 176 244Q195 192 230 153.5Q265 115 314 93Q363 71 424 71Q485 71 535 93Q585 115 620 153.5Q655 192 674 244Q693 296 693 355Z"/>
+    <path id="tag-u" d="M356 -18Q286 -18 234 5.5Q182 29 148 68Q114 107 97.5 157.5Q81 208 81 262V708H180V268Q180 232 189 196.5Q198 161 218.5 133Q239 105 272.5 88Q306 71 356 71Q405 71 439 88Q473 105 493.5 133Q514 161 523 196.5Q532 232 532 268V708H631V262Q631 208 614.5 157.5Q598 107 564 68Q530 29 478 5.5Q426 -18 356 -18Z"/>
+    <path id="tag-r" d="M185 0H86V708H313Q364 708 410 697.5Q456 687 490.5 664Q525 641 545 603.5Q565 566 565 512Q565 434 517 386Q469 338 393 325L591 0H471L291 315H185ZM185 398H299Q334 398 364 404Q394 410 416.5 423.5Q439 437 452 458.5Q465 480 465 512Q465 544 452 565.5Q439 587 417.5 600Q396 613 367 618.5Q338 624 306 624H185Z"/>
+    <path id="tag-m" d="M452 164H454L663 708H817V0H718V592H716L481 0H418L184 592H182V0H86V708H240Z"/>
+    <path id="tag-n" d="M585 142H587V708H686V0H561L187 578H185V0H86V708H215Z"/>
+    <path id="tag-e" d="M185 88H555V0H86V708H540V621H185V409H519V324H185Z"/>
+    <path id="tag-s" d="M438 577Q417 606 381 624.5Q345 643 300 643Q276 643 251.5 636.5Q227 630 207 615.5Q187 601 174.5 579.5Q162 558 162 528Q162 499 173.5 479.5Q185 460 204.5 446.5Q224 433 250.5 423.5Q277 414 307 404Q343 393 380 379Q417 365 447 342Q477 319 496 284.5Q515 250 515 197Q515 142 494.5 101.5Q474 61 440 34.5Q406 8 361.5 -5Q317 -18 270 -18Q203 -18 140.5 8Q78 34 37 85L114 150Q139 113 181 90Q223 67 272 67Q297 67 322 74Q347 81 367.5 96Q388 111 401 133.5Q414 156 414 188Q414 220 400.5 241.5Q387 263 364 278Q341 293 310.5 303.5Q280 314 246 325Q212 335 179 349.5Q146 364 120 386.5Q94 409 78 442Q62 475 62 524Q62 577 83.5 615Q105 653 139.5 678Q174 703 217.5 714.5Q261 726 305 726Q367 726 421 704Q475 682 508 645Z"/>
+    <path id="tag-period" d="M197 60Q197 34 178 14Q159 -6 130 -6Q102 -6 82.5 13.5Q63 33 63 59Q63 86 82 105.5Q101 125 130 125Q159 125 178 106Q197 87 197 60Z"/>
+    <g id="tagline" fill="#d8d8dc">
+      <use href="#tag-y"/>
+      <use href="#tag-o" transform="translate(739 0)"/>
+      <use href="#tag-u" transform="translate(1703 0)"/>
+      <use href="#tag-r" transform="translate(2530 0)"/>
+      <use href="#tag-m" transform="translate(3429 0)"/>
+      <use href="#tag-o" transform="translate(4447 0)"/>
+      <use href="#tag-n" transform="translate(5411 0)"/>
+      <use href="#tag-e" transform="translate(6298 0)"/>
+      <use href="#tag-y" transform="translate(7014 0)"/>
+      <use href="#tag-period" transform="translate(7753 0)"/>
+      <use href="#tag-y" transform="translate(8298 0)"/>
+      <use href="#tag-o" transform="translate(9037 0)"/>
+      <use href="#tag-u" transform="translate(10001 0)"/>
+      <use href="#tag-r" transform="translate(10828 0)"/>
+      <use href="#tag-s" transform="translate(11557 0)"/>
+      <use href="#tag-period" transform="translate(12241 0)"/>
+    </g>
+  </defs>
+  <use href="#open-o" transform="translate(164 24) scale(0.98)"/>
+  <use href="#ouryn-word" transform="translate(166 425) scale(0.12 -0.12)"/>
+  <use href="#tagline" transform="translate(120 480) scale(0.032 -0.024)"/>
+</svg>

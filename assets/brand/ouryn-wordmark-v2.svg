@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 300" role="img" aria-labelledby="title desc">
+  <title id="title">Ouryn symbol and wordmark</title>
+  <desc id="desc">The Ouryn open O symbol placed beside the Ouryn wordmark.</desc>
+  <defs>
+    <linearGradient id="silver" x1="76" y1="54" x2="255" y2="265" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fcfcfc"/>
+      <stop offset="0.16" stop-color="#c6c6c8"/>
+      <stop offset="0.34" stop-color="#ffffff"/>
+      <stop offset="0.58" stop-color="#e6e6e7"/>
+      <stop offset="0.81" stop-color="#a6a6aa"/>
+      <stop offset="1" stop-color="#f4f4f5"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="104" y1="45" x2="247" y2="259" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.9"/>
+      <stop offset="0.5" stop-color="#f7f7f8" stop-opacity="0"/>
+      <stop offset="1" stop-color="#55555a" stop-opacity="0.62"/>
+    </linearGradient>
+    <radialGradient id="dot" cx="33%" cy="28%" r="78%">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.42" stop-color="#f7f7f8"/>
+      <stop offset="1" stop-color="#b9b9bd"/>
+    </radialGradient>
+    <linearGradient id="word-silver" x1="0" y1="80" x2="0" y2="195" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.6" stop-color="#f2f2f3"/>
+      <stop offset="1" stop-color="#c9c9cd"/>
+    </linearGradient>
+    <filter id="depth" x="-20%" y="-20%" width="150%" height="160%" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1.2" result="blur"/>
+      <feOffset in="blur" dx="0" dy="1.5" result="offset"/>
+      <feColorMatrix in="offset" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.16 0" result="shadow"/>
+      <feMerge>
+        <feMergeNode in="shadow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <g id="open-o" filter="url(#depth)">
+      <path d="M203.7 69.8A102 102 0 1 0 262 160" fill="none" stroke="url(#silver)" stroke-width="40" stroke-linecap="round"/>
+      <path d="M203.7 69.8A102 102 0 1 0 262 160" fill="none" stroke="url(#rim)" stroke-width="3" stroke-linecap="round" opacity="0.48"/>
+      <circle cx="248" cy="102" r="20" fill="url(#dot)"/>
+      <circle cx="248" cy="102" r="20" fill="none" stroke="#ffffff" stroke-opacity="0.2"/>
+    </g>
+    <g id="ouryn-word" transform="scale(0.89 1)" fill="#f1f1f2">
+      <path d="M800 355Q800 273 771.5 204.5Q743 136 693 86.5Q643 37 574 9.5Q505 -18 424 -18Q343 -18 274.5 9.5Q206 37 156 86.5Q106 136 78 204.5Q50 273 50 355Q50 438 78 506.5Q106 575 156 623.5Q206 672 274.5 699Q343 726 424 726Q505 726 574 699Q643 672 693 623.5Q743 575 771.5 506.5Q800 438 800 355ZM693 355Q693 413 674 464.5Q655 516 620 555Q585 594 535.5 616.5Q486 639 424 639Q363 639 313.5 616.5Q264 594 229.5 555Q195 516 176 464.5Q157 413 157 355Q157 296 176 244Q195 192 230 153.5Q265 115 314 93Q363 71 424 71Q485 71 535 93Q585 115 620 153.5Q655 192 674 244Q693 296 693 355Z"/>
+      <path transform="translate(849 0)" d="M415 0Q413 18 412 40.5Q411 63 411 78H409Q391 40 348.5 13.5Q306 -13 254 -13Q208 -13 174.5 2Q141 17 119.5 43.5Q98 70 87.5 105Q77 140 77 180V474H171V212Q171 183 175.5 156.5Q180 130 192 110Q204 90 225 78Q246 66 279 66Q336 66 371 108.5Q406 151 406 222V474H500V102Q500 83 501 53Q502 23 504 0Z"/>
+      <path transform="translate(1431 0)" d="M81 372Q81 391 80 421Q79 451 77 474H166Q168 456 169 432.5Q170 409 170 394H173Q193 436 231.5 461.5Q270 487 318 487Q340 487 355 483L351 396Q331 401 308 401Q274 401 249 388.5Q224 376 207.5 355Q191 334 183 306.5Q175 279 175 249V0H81V372Z"/>
+      <path transform="translate(1793 0)" d="M261 102H263L394 474H494L264 -112Q252 -142 238 -165.5Q224 -189 205 -205.5Q186 -222 160.5 -231Q135 -240 100 -240Q85 -240 69.5 -238.5Q54 -237 38 -233L47 -150Q71 -158 94 -158Q131 -158 149 -137.5Q167 -117 182 -79L212 0L9 474H114Z"/>
+      <path transform="translate(2297 0)" d="M166 474Q168 456 169 433.5Q170 411 170 396H173Q182 415 197.5 431.5Q213 448 233 460.5Q253 473 277 480Q301 487 327 487Q373 487 406 471.5Q439 456 461 430Q483 404 493.5 369Q504 334 504 294V0H410V263Q410 292 405.5 318Q401 344 389 364Q377 384 356 396Q335 408 302 408Q246 408 210.5 365.5Q175 323 175 252V0H81V372Q81 391 80 421Q79 451 77 474Z"/>
+    </g>
+  </defs>
+  <use href="#open-o" transform="translate(3 12) scale(0.86)"/>
+  <use href="#ouryn-word" transform="translate(292 192) scale(0.12 -0.12)"/>
+</svg>

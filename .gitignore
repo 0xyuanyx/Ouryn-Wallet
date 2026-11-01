@@ -1,0 +1,67 @@
+# ── Secrets / signing (never commit) ──────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p8
+*.p12
+*.cer
+*.mobileprovision
+*.provisionprofile
+*.keystore
+*.jks
+GoogleService-Info.plist
+google-services.json
+Secrets.xcconfig
+*.secret
+*.secrets
+id.json
+*keypair*.json
+
+# ── Local backups / scratch snapshots ─────────────────────────
+.backup/
+_backup/
+*.bak
+
+# ── macOS ─────────────────────────────────────────────────────
+.DS_Store
+Icon?
+
+# ── Xcode ─────────────────────────────────────────────────────
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+*.xcarchive
+Pods/
+
+# ── Node / Expo ───────────────────────────────────────────────
+node_modules/
+.expo/
+dist/
+web-build/
+npm-debug.*
+
+# ── Tool caches ───────────────────────────────────────────────
+.superdesign/
+.calm-design/
+
+# ── Large design exports (11MB+ HTML at repo root) — remove to track them
+/*.html
+
+# ── Not for the public repo
+*outputs/
+QR-*.png
+
+# ── Keep the public repo lean: no prototype, working notes, or process logs
+/prototype/
+/design-fixes.md
+/qr-scan-animation.md
+/ios/Tests/P0-review.md
+/ios/Tests/P1-review.md
+/ios/Tests/QR-review.md
+/*.png
+
+# ── Local working notes
+/docs/audits/

@@ -35,6 +35,8 @@ enum ChainAPI {
         var eth: Double?
         var btc: Double?
         var cardano: CardanoBal?
+        /// 아직 블록에 안 들어간 비트코인 입금 (잔액엔 안 넣고 '확인 중'으로만 보여줌)
+        var btcIncoming: Double? = nil
         var failed: [String] {
             var f: [String] = []
             if solana == nil { f.append("솔라나") }
@@ -54,7 +56,8 @@ enum ChainAPI {
         async let e = ethereum(a.ethereum, on: nets.contains("이더리움"))
         async let b = bitcoin(a.bitcoin, on: nets.contains("비트코인"))
         async let c = cardano(a.cardano, on: nets.contains("카르다노"))
-        return await Balances(solana: s, eth: e, btc: b, cardano: c)
+        let btc = await b
+        return await Balances(solana: s, eth: e, btc: btc?.balance, cardano: c, btcIncoming: btc?.incoming)
     }
 
     static func solana(_ addr: String, on: Bool = true) async -> SolanaBal? {
@@ -84,7 +87,8 @@ enum ChainAPI {
         return hexToDouble(hex).map { $0 / 1e18 }
     }
 
-    static func bitcoin(_ addr: String, on: Bool = true) async -> Double? {
+    /// balance: 블록에 들어간 잔액 (기다리는 중인 '나가는' 돈은 미리 뺌) · incoming: 아직 블록에 안 들어간 '들어오는' 돈
+    static func bitcoin(_ addr: String, on: Bool = true) async -> (balance: Double, incoming: Double)? {
         guard on else { return nil }
         guard let data = try? await BitcoinTransfer.get("/address/" + addr), let j = try? JSONSerialization.jsonObject(with:data) as? [String:Any] else { return nil }
         func part(_ k: String) -> Double {
@@ -93,7 +97,8 @@ enum ChainAPI {
         // 블록에 들어간 것만 잔액으로 셈. 아직 블록에 안 들어간(메모리풀) '들어오는' 돈은 바뀌거나 사라질 수 있어서
         // 잔액·입금 완료·'들어왔어요'에 넣지 않고 블록에 들어간 뒤에 반영
         // 메모리풀 합이 음수(보낸 거래가 기다리는 중 · 거스름돈 포함)일 때만 미리 반영해서, 보낸 직후 잔액이 그대로 보이지 않게
-        return (part("chain_stats") + min(0, part("mempool_stats"))) / 1e8
+        let pool = part("mempool_stats")
+        return ((part("chain_stats") + min(0, pool)) / 1e8, max(0, pool) / 1e8)
     }
 
     static func cardano(_ addr: String, on: Bool = true) async -> CardanoBal? {

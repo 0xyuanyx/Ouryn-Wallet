@@ -94,7 +94,7 @@ struct AccountSheet: View {
             }
             .padding(.top, 14)
 
-            TX("통장을 길게 누르면 이름 바꾸기 · 지우기", .r, 12, Color(hex: "#6B6B76"))
+            TX("통장을 길게 누르면 이름 바꾸기 · 지우기", .r, 12, C.mute)
                 .frame(maxWidth: .infinity)
                 .padding(.top, 10)
                 .padding(.bottom, 8)
@@ -163,7 +163,7 @@ struct AccountSheet: View {
                         Tap(action: { withAnimation(.easeOut(duration: 0.2)) { adding = w.id } }) {
                             HStack(spacing: 8) {
                                 Icon("add", 16, C.sub)
-                                tt("통장 추가", .sb, 14, C.sub) + tt(" · 백업 필요 없어요", .r, 14, Color(hex: "#6B6B76"))
+                                tt("통장 추가", .sb, 14, C.sub) + tt(" · 백업 필요 없어요", .r, 14, C.mute)
                                 Spacer()
                             }
                             .padding(.horizontal, 14)
@@ -320,7 +320,7 @@ struct AddWalletView: View {
             }
 
             TX("지갑을 나눠두면, 12단어 하나를 누가 알게 돼도\n그 지갑에 있는 돈만 위험하고 다른 지갑 돈은 안전해요.",
-               .r, 12, Color(hex: "#6B6B76"), lh: 18, align: .center)
+               .r, 12, C.mute, lh: 18, align: .center)
                 .frame(maxWidth: .infinity)
                 .padding(.bottom, 16)
         }
@@ -431,7 +431,7 @@ struct ImportWalletView: View {
                        .r, 15, C.sub, lh: 22)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 10)
-                    TX("비밀 문구(passphrase · 25번째 단어)를 함께 쓰던 지갑은 아직 가져올 수 없어요. 하드웨어 지갑(Ledger 등)의 단어를 폰에 입력하면 하드웨어 지갑의 보호를 잃으니, 그 돈은 하드웨어 지갑으로 관리하세요.",
+                    TX("12단어에 비밀번호(25번째 단어)를 더해 쓰던 지갑은 아직 가져올 수 없어요. Ledger 같은 하드웨어 지갑의 단어는 폰에 입력하지 마세요. 하드웨어 지갑의 보호가 사라져요.",
                        .r, 13, C.mute, lh: 19)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 8)
@@ -467,15 +467,26 @@ struct ImportWalletView: View {
         guard WalletKeys.isValid(w) else {
             bad = "단어는 맞는데 순서나 조합이 맞지 않아요. 적어둔 종이를 다시 확인해주세요."; haptic(.error); return
         }
-        if let same = store.existingWallet(words: w) {
-            bad = "이미 이 폰에 있는 지갑이에요 (\(same))."; haptic(.error); return
+        // 같은 12단어가 이미 있으면, 그 지갑이 아직 쓰지 않는 방식(Phantom·MetaMask ↔ Trust Wallet·Ledger)만 찾아봄
+        // → 처음 설치 때 Phantom 방식으로 되찾은 12단어라도 Trust Wallet 방식 통장을 따로 가져올 수 있게
+        let holders = store.st.walletList.filter { WalletKeys.holds(w, wallet: $0.id) }
+        let left = [KeyScheme.standard, .alt].filter { s in !holders.contains { $0.scheme == s } }
+        if let first = holders.first, left.isEmpty {
+            bad = "이미 이 폰에 있는 지갑이에요 (\(first.name))."; haptic(.error); return
         }
         bad = nil
         hideKeyboard()
         step = "search"
         Task {
-            let r = await store.discover(words: w)
+            let r: WalletScan
+            if holders.isEmpty { r = await store.discover(words: w) } else { r = await store.discover(words: w, only: left[0]) }
             await MainActor.run {
+                if let first = holders.first, r.accounts.isEmpty {
+                    step = "words"
+                    bad = "이미 이 폰에 있는 지갑이에요 (\(first.name)). 다른 방식으로 쓰던 통장도 찾지 못했어요."
+                    haptic(.error)
+                    return
+                }
                 scan = r
                 step = "found"
                 haptic(.success)
@@ -530,7 +541,8 @@ struct ImportWalletView: View {
                     } else {
                         HStack(spacing: 8) {
                             Icon("checkmark", 16, C.green)
-                            TX("두 방식의 0~\(max(0, (scan?.next ?? WalletDiscovery.batch) - 1))번 통장을 확인했어요", .r, 13, Color(hex: "#D8D8DC"))
+                            TX((scan?.otherScheme == nil ? "\(scan?.scheme == .alt ? "Trust Wallet·Ledger" : "Phantom·MetaMask") 방식의" : "두 방식의")
+                               + " 0~\(max(0, (scan?.next ?? WalletDiscovery.batch) - 1))번 통장을 확인했어요", .r, 13, Color(hex: "#D8D8DC"))
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 10)
@@ -565,8 +577,8 @@ struct ImportWalletView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 20))
                     .padding(.top, 14)
 
-                    TX("잔액이나 거래 기록이 있는 통장만 가져와요. 비어 있는 통장은 나중에 '통장 추가'로 열 수 있어요. 비트코인은 통장마다 첫 받기 주소(m/84'/0'/n'/0/0) 하나, 카르다노도 첫 주소 하나만 확인해요. 다른 주소에 있는 돈은 원래 앱에서 확인해주세요.",
-                       .r, 12, Color(hex: "#6B6B76"), lh: 18)
+                    TX("잔액이나 거래 기록이 있는 통장만 가져와요. 비어 있는 통장은 나중에 '통장 추가'로 열 수 있어요. 비트코인·카르다노는 통장마다 첫 주소만 확인해서, 다른 주소에 있는 돈은 원래 앱에서 확인해주세요.",
+                       .r, 13, C.mute, lh: 19)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 10)
 
@@ -626,7 +638,7 @@ struct ImportWalletView: View {
                 TX(sub, .r, 13, C.mute, lines: 1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            TX(wonOf(f.usd), .sb, 16, f.usd > 0 ? C.text : Color(hex: "#6B6B76"))
+            TX(wonOf(f.usd), .sb, 16, f.usd > 0 ? C.text : C.mute)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)

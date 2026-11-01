@@ -93,14 +93,15 @@ struct HomeView: View {
                         Card(top: 18, bottom: 8) {
                             SectionTitle(title: st.homeMode == "list" ? "내 지갑" : "내 돈", right: "편집") { router.push(.homeEdit) }
                             if st.homeMode == "list" {
-                                let shown = listOpen ? st.assetOrder : Array(st.assetOrder.prefix(5))
+                                let order = st.homeAssets
+                                let shown = listOpen ? order : Array(order.prefix(5))
                                 ForEach(shown, id: \.self) { id in
                                     AssetRow(id: id) { router.push(assetRoute(id)) }
                                 }
-                                if st.assetOrder.count > 5 {
+                                if order.count > 5 {
                                     Tap(action: { withAnimation(.easeOut(duration: 0.25)) { listOpen.toggle() } }) {
                                         HStack(spacing: 4) {
-                                            TX(listOpen ? "접기" : "\(st.assetOrder.count - 5)개 더 보기", .m, 14, C.sub)
+                                            TX(listOpen ? "접기" : "\(order.count - 5)개 더 보기", .m, 14, C.sub)
                                             Icon(listOpen ? "chevron-up" : "chevron-down", 14, C.sub)
                                         }
                                         .frame(maxWidth: .infinity)
@@ -211,7 +212,10 @@ struct HomeView: View {
         let coinSub = held.isEmpty ? "아직 없어요" : (held.count == 1 ? assetMeta(held[0]).name : "\(assetMeta(held[0]).name) 외 \(held.count - 1)개")
         ListItem(left: AnyView(MetalBadge(label: "$")), title: "달러", sub: "바로 쓸 수 있는 돈",
                  right: money(st.walletTotal)) { router.push(.dollar) }
-        AssetRow(id: "savings") { router.push(.savings) }
+        // 이자 모으기는 준비 중 — 예전 버전에서 넣어 둔 돈이 있을 때만 보여줌
+        if st.savings.principal > 0 {
+            AssetRow(id: "savings") { router.push(.savings) }
+        }
         ListItem(left: AnyView(MetalBadge(icon: "stats-chart")), title: "코인", sub: coinSub,
                  right: money(st.coinsUsd), rightSub: coinsKrw > 0 ? pct(coinsChange) : nil,
                  rightSubColor: coinsChange >= 0 ? C.up : C.down) { router.push(.coins) }

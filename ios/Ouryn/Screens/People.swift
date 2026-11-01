@@ -123,6 +123,14 @@ struct TxDetailView: View {
             .padding(.top, 8)
             .padding(.bottom, 24)
 
+            // 모르는 주소에서 온 소액: 내가 자주 보내는 주소와 비슷하게 만든 주소로 소액을 보내 두고,
+            // 나중에 그 주소로 보내게 만드는 사기(주소 오염)일 수 있음
+            if t.type == .receive && t.addr != nil && name == nil && t.amt < 5 {
+                Notice(icon: "warning", color: C.amber, bg: C.amberSoft, title: "모르는 주소에서 온 소액이에요",
+                       text: "자주 보내는 주소와 앞뒤 글자가 비슷한 주소로 소액을 보내, 나중에 그 주소로 돈을 보내게 만드는 사기가 있어요. 이 주소를 복사하거나 이 주소로 보내지 마세요.")
+                    .padding(.bottom, 12)
+            }
+
             // 진행 중 / 늦어짐 / 실패 안내
             if t.inFlight && t.type != .send {
                 TimelineView(.periodic(from: .now, by: 0.5)) { ctx in
@@ -207,10 +215,6 @@ struct TxDetailView: View {
                 }
             }
 
-            Tap(action: { toast("고객센터 연결은 실제 앱에서 제공돼요", "chatbubbles-outline") }) {
-                TX("이 거래에 문제가 있나요?", .r, 14, C.mute).underline(color: C.mute).padding(.vertical, 12)
-            }
-            .frame(maxWidth: .infinity)
         } footer: {
             if person && !t.inFlight {
                 HStack(spacing: 8) {
@@ -219,7 +223,8 @@ struct TxDetailView: View {
                     }
                     if t.type == .send && t.status == .failed {
                         OButton("다시 보내기") { router.send(PayRequest(to:t.addr ?? "",network:t.network,asset:t.assetId)) }
-                    } else if t.isDollar {
+                    } else if t.isDollar && (t.type == .send || name != nil) {
+                        // 받은 거래는 이름을 붙인(주소록·내 통장) 보낸 사람에게만 '보내기' — 주소 오염 사기로 모르는 주소에 보내지 않게
                         OButton(t.type == .send ? "한 번 더 보내기" : "보내기") { router.send(PayRequest(to:t.addr ?? "",network:t.network,asset:t.assetId)) }
                     }
                 }
@@ -1065,11 +1070,12 @@ struct SchedulesView: View {
         let st = store.st
         let list = st.schedules.sorted { nextRun($0.day) < nextRun($1.day) }
         OScreen {
-            TX("정한 날 아침 9시에 알아서 보내드려요. 돈이 모자라면 보내지 않고 미리 알려드려요.", .r, 15, C.sub, lh: 22)
+            // 자동 보내기는 아직 없음: 보낼 때마다 본인 확인이 필요해서 앱이 혼자 보낼 수 없음
+            Notice(icon: "construct-outline", color: C.sub, bg: C.surface, title: "자동 보내기는 준비 중이에요",
+                   text: "여기 있는 일정은 저절로 보내지지 않아요. 보낼 날이 되면 '지금 보내기'를 눌러 직접 보내주세요.")
                 .padding(.bottom, 20)
-                .padding(.horizontal, 4)
             if list.isEmpty {
-                Empty(icon: "repeat", title: "자동 보내기가 없어요", sub: "보낼 때 \"매달 자동으로 보내기\"를 켜면\n여기에 모여요")
+                Empty(icon: "repeat", title: "자동 보내기가 없어요", sub: "자동 보내기는 아직 준비 중이에요")
             } else {
                 ForEach(list) { sc in
                     let n = st.nameOf(sc.to) ?? "모르는 지갑"

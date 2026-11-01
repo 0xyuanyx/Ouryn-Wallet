@@ -76,11 +76,15 @@ enum BitcoinTransfer {
  }
  /// 블록에 들어간 뒤 network.confirmations(3) 블록이 쌓여야 완료. 그 전에는 확인 중
  static func status(_ hash:String) async throws -> TxStatus {
+  try await progress(hash).status
+ }
+ /// 상태 + 블록에 들어갔는지 (들어갔으면 다음 송금은 그 거래의 거스름돈까지 확정된 코인으로 만들 수 있음)
+ static func progress(_ hash:String) async throws -> (status: TxStatus, included: Bool) {
   let json = try JSONSerialization.jsonObject(with:await get("/tx/" + hash + "/status")) as? [String:Any]
-  guard json?["confirmed"] as? Bool == true, let height = (json?["block_height"] as? NSNumber)?.intValue else { return .pending }
+  guard json?["confirmed"] as? Bool == true, let height = (json?["block_height"] as? NSNumber)?.intValue else { return (.pending, false) }
   let tipText = String(data:try await get("/blocks/tip/height"),encoding:.utf8)?.trimmingCharacters(in:.whitespacesAndNewlines) ?? ""
-  guard let tip = Int(tipText), tip >= height else { return .pending }
-  return tip - height + 1 >= WalletNetwork.bitcoin.confirmations ? .done : .pending
+  guard let tip = Int(tipText), tip >= height else { return (.pending, true) }
+  return (tip - height + 1 >= WalletNetwork.bitcoin.confirmations ? .done : .pending, true)
  }
 }
 extension WalletKeys {

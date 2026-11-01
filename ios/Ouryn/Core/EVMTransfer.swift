@@ -38,15 +38,19 @@ enum EVMTransfer {
  /// 영수증이 생겨도 바로 '완료'로 보지 않고, 그 위에 블록이 충분히 쌓였을 때 완료 (network.confirmations)
  /// 그 전까지는 확인 중으로 두고 다음 동기화 때 다시 봄 → 짧은 재조직으로 사라진 거래를 완료로 남기지 않음
  static func status(_ hash:String,network:WalletNetwork) async throws -> TxStatus {
+  try await progress(hash,network:network).status
+ }
+ /// 상태 + 블록에 들어갔는지 (확정 깊이 전이라도 들어갔으면 같은 네트워크의 다음 송금을 막지 않으려고)
+ static func progress(_ hash:String,network:WalletNetwork) async throws -> (status: TxStatus, included: Bool) {
   guard let rpc = network.rpc else { throw TransferError.invalid("네트워크 오류") }
   let response = try await MultiChainAPI.request(rpc,body:["jsonrpc":"2.0","id":1,"method":"eth_getTransactionReceipt","params":[hash]])
   guard response["error"] == nil else { throw MultiChainAPI.APIError.invalid }
-  guard let receipt = response["result"] as? [String:Any], let status = receipt["status"] as? String else { return .pending }
-  guard status == "0x1" else { return .failed }
-  guard network.confirmations > 1 else { return .done }
+  guard let receipt = response["result"] as? [String:Any], let status = receipt["status"] as? String else { return (.pending, false) }
+  guard status == "0x1" else { return (.failed, true) }
+  guard network.confirmations > 1 else { return (.done, true) }
   guard let included = (receipt["blockNumber"] as? String).flatMap({ ExactAmount.hexDecimal($0) }),
-        let head = ExactAmount.hexDecimal(try await MultiChainAPI.rpc(network,"eth_blockNumber",[])), head >= included else { return .pending }
-  return head - included + 1 >= Decimal(network.confirmations) ? .done : .pending
+        let head = ExactAmount.hexDecimal(try await MultiChainAPI.rpc(network,"eth_blockNumber",[])), head >= included else { return (.pending, true) }
+  return (head - included + 1 >= Decimal(network.confirmations) ? .done : .pending, true)
  }
 }
 extension WalletKeys {

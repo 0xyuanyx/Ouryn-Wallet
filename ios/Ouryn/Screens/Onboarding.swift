@@ -154,6 +154,12 @@ struct OnboardingView: View {
             toast("비밀번호를 저장하지 못했어요. 다시 시도해주세요", "alert-circle")
             return
         }
+        // 12단어로 되찾았으면 1번 이후 통장·다른 방식 통장도 찾아봄 (0번만 만들면 다른 통장의 돈이 사라진 것처럼 보여서)
+        if mode == "restore" || mode == "reopen" {
+            let w = WalletKeys.normalize(words)
+            words = ""
+            Task { await store.adoptAccountsAfterRestore(words: w) }
+        }
     }
 
     @ViewBuilder private var content: some View {
@@ -246,7 +252,7 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 28) {
                 Point(icon: "key", title: "내 돈은 나만 꺼낼 수 있어요", sub: "회사도, 누구도 대신 꺼내거나 막을 수 없어요.")
                 Point(icon: "document-lock", title: "복구 문구 12단어가 유일한 백업이에요", sub: "지갑 열쇠는 이 폰 안에만 있어요. 폰을 잃어버리면 12단어로만 되찾을 수 있어요.")
-                Point(icon: "globe", title: "실제 블록체인 지갑이에요", sub: "솔라나·이더리움·비트코인·카르다노 주소가 만들어지고, 잔액은 실제 네트워크에서 읽어요.")
+                Point(icon: "globe", title: "실제 블록체인 지갑이에요", sub: "트론·솔라나·이더리움·비트코인 등 7개 네트워크 주소가 만들어지고, 잔액은 실제 네트워크에서 읽어요.")
             }
             .padding(.top, 36)
             Spacer()
@@ -264,8 +270,6 @@ struct OnboardingView: View {
                 Choice(icon: "document-lock", title: "복구 문구 12단어", sub: "종이에 적어둔 영어 단어로 되찾기") {
                     mode = "restore"; words = ""; wordsBad = false; step = "words"
                 }
-                Choice(icon: "logo-apple", title: "iCloud", sub: "준비 중이에요", enabled: false) {}
-                Choice(icon: "logo-google", title: "구글 드라이브", sub: "준비 중이에요", enabled: false) {}
             }
             .padding(.top, 28)
             Spacer()

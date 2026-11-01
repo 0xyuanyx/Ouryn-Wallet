@@ -417,7 +417,7 @@ struct FromExchangeView: View {
             }
             HStack(alignment: .top, spacing: 10) {
                 Icon("notifications", 18, C.sub)
-                TX("출금 신청 뒤 이 화면을 닫아도 괜찮아요. 실제 잔액이 늘어나면 도착으로 표시해요. 보통 몇 분에서 몇십 분 걸려요.", .r, 13, C.sub, lh: 19)
+                TX("출금 신청 뒤 이 화면을 닫아도 괜찮아요. 앱이 열려 있을 때 실제 잔액이 늘어나면 도착으로 표시해요. 앱을 완전히 닫았다면 다시 열 때 확인해요. 보통 몇 분에서 몇십 분 걸려요.", .r, 13, C.sub, lh: 19)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(16)

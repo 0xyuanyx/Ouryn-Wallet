@@ -570,8 +570,9 @@ struct TransferFlow: View {
  private func prepare() {
   guard let owner = store.st.address(net: network.rawValue) else { error = "지갑 주소 검증을 확인해주세요"; return }
   guard !isSelf else { error = "지금 통장의 내 주소예요. 내 주소로는 보낼 수 없어요"; return }
-  // 같은 네트워크에 확정 안 된 송금이 있으면 새로 보내지 않음 (나중에 둘 다 처리돼 두 번 나가는 일 방지)
-  if let prior = store.st.tx.first(where: { $0.type == .send && $0.inFlight && $0.network == network.rawValue }) {
+  // 같은 네트워크에 아직 블록에 안 들어간 송금이 있으면 새로 보내지 않음 (나중에 둘 다 처리돼 두 번 나가는 일 방지)
+  // 블록에 들어갔으면(included) 확정 깊이를 기다리는 중이어도 다음 송금은 막지 않음
+  if let prior = store.st.tx.first(where: { $0.type == .send && $0.inFlight && $0.network == network.rawValue && $0.included != true }) {
    error = prior.status == .delayed
     ? "이 네트워크의 이전 송금이 오래 확인되지 않고 있어요. 그 송금이 처리되거나 실패로 확인된 뒤에 보낼 수 있어요"
     : "이 네트워크에서 이전 송금을 확인 중이에요"
@@ -599,7 +600,7 @@ struct TransferFlow: View {
   guard !busy else { return }
   error = ""
   let wallet = WalletKeys.active.wallet
-  switch WalletKeys.sendGate(wallet: wallet, pinAlways: store.st.pinOnSend) {
+  switch WalletKeys.sendGate(wallet: wallet, pinAlways: store.st.pinBeforeSendOn) {
   case .faceID:
    unlockAndSend(quoted)
   case .pin:
@@ -629,11 +630,37 @@ struct TransferFlow: View {
   }
  }
 
+ /// 본인 확인을 마쳤을 때 견적이 만료됐거나 곧 만료되면(45초) 같은 내용으로 새로 받음
+ /// 받는 곳·코인·수량이 같고 수수료 상한이 처음 확인한 값 이하일 때만 새 견적으로 서명
+ /// → 12단어를 입력하느라 오래 걸려도 처음부터 다시 하지 않게. 수수료가 올랐으면 서명하지 않고 새 견적을 보여줘서 다시 확인받음
+ @MainActor private func fresh(_ q: TransferQuote) async throws -> TransferQuote {
+  guard q.expires.timeIntervalSinceNow < 8 else { return q }
+  guard let amount = ExactAmount.text(raw: q.raw, decimals: q.network.decimals(q.asset)) else { throw TransferError.invalid("보낼 수량을 확인해주세요") }
+  let next: TransferQuote
+  switch q.network {
+  case .tron: next = try await TronTransfer.quote(owner: q.owner, to: q.recipient, asset: q.asset, amount: amount)
+  case .solana: next = try await SolanaTransferEngine.quote(owner: q.owner, to: q.recipient, asset: q.asset, amount: amount)
+  case .bitcoin: next = try await BitcoinTransfer.quote(owner: q.owner, to: q.recipient, amount: amount)
+  case .cardano: next = try await CardanoTransfer.quote(owner: q.owner, to: q.recipient, asset: q.asset, amount: amount)
+  default: next = try await EVMTransfer.quote(network: q.network, owner: q.owner, to: q.recipient, asset: q.asset, amount: amount)
+  }
+  guard next.network == q.network, next.asset == q.asset, next.owner == q.owner, next.recipient == q.recipient, next.raw == q.raw else {
+   throw TransferError.invalid("보낼 내용이 바뀌었어요. 다시 확인해주세요")
+  }
+  guard next.fee <= q.fee else {
+   quote = next
+   throw TransferError.invalid("수수료 상한이 올랐어요. 새 수수료를 확인하고 다시 보내주세요")
+  }
+  return next
+ }
+
  /// 서명 → 전파. 12단어는 서명하는 동안만 메모리에 두고 버림
- @MainActor private func send(_ quoted: TransferQuote, mnemonic: String) async {
+ @MainActor private func send(_ confirmed: TransferQuote, mnemonic: String) async {
   defer { busy = false }
   guard active, let wallet = HDWallet(mnemonic: mnemonic, passphrase: "") else { error = "지갑을 열지 못했어요"; return }
   do {
+   let quoted = try await fresh(confirmed)
+   guard active else { return }
    let signed: SignedTransfer = try WalletKeys.withSigner(wallet) { () throws -> SignedTransfer in
     switch quoted.network {
     case .tron: return try WalletKeys.signTron(quoted)

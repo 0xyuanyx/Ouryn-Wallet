@@ -413,6 +413,44 @@ extension Store {
                           otherScheme: .alt, otherUsed: WalletDiscovery.extraUsed(alt, beyond: std))
     }
 
+    /// 한 가지 방식만 찾기 — 같은 12단어가 이미 다른 방식으로 이 폰에 있을 때 (아직 없는 방식의 통장만 가져오려고)
+    func discover(words: String, only scheme: KeyScheme) async -> WalletScan {
+        if Testnet.on { await MainActor.run { self.switchAccount("main#0") } }
+        let base = await MainActor.run { self.st }
+        return await WalletDiscovery.scan(words: words, scheme: scheme, base: base)
+    }
+
+    /// 처음 설치한 뒤 12단어로 되찾았을 때(온보딩): 이 지갑과 같은 방식(Phantom·MetaMask)에서 1번 이후 쓰던 통장을 찾아 붙이고,
+    /// 다른 방식(Trust Wallet·Ledger)에서만 보이는 통장이 있으면 가져오는 방법을 알림으로 알려줌
+    /// (온보딩 복구는 0번 통장만 만들어서, 그대로 두면 다른 통장의 돈이 사라진 것처럼 보임)
+    func adoptAccountsAfterRestore(words: String) async {
+        let base = await MainActor.run { self.st }
+        async let a = WalletDiscovery.scan(words: words, scheme: .standard, base: base)
+        async let b = WalletDiscovery.scan(words: words, scheme: .alt, base: base)
+        let std = await a, alt = await b
+        await MainActor.run {
+            guard self.st.onboarded, WalletKeys.holds(words, wallet: "main") else { return }
+            let have = Set(self.st.accountsIn("main").map(\.index))
+            let extra = std.accounts.filter { $0.index > 0 && !have.contains($0.index) }
+            let otherOnly = WalletDiscovery.extraUsed(alt, beyond: std)
+            let stamp = Int(Date().timeIntervalSince1970 * 1000)
+            self.update { s in
+                if !extra.isEmpty {
+                    s.accounts = (s.accounts ?? []) + extra.map { f in
+                        Account(id: "main#\(f.index)", walletId: "main", index: f.index, name: "통장 \(f.index + 1)", addrs: f.addrs, snap: f.snap)
+                    }
+                    s.notifications.insert(Noti(id: "n\(stamp)a", icon: "wallet", title: "쓰던 통장 \(extra.count)개를 더 찾았어요",
+                                                body: "같은 12단어의 다른 통장이에요. 홈 위의 통장 이름을 눌러 바꿀 수 있어요.", ts: Date(), read: false), at: 0)
+                }
+                if otherOnly > 0 {
+                    s.notifications.insert(Noti(id: "n\(stamp)b", icon: "download-outline", title: "다른 방식으로 쓰던 통장이 있어요",
+                                                body: "Trust Wallet·Ledger 방식에서 쓰던 통장 \(otherOnly)개가 보여요. 전체 → 통장 · 지갑 관리 → 지갑 추가 → 다른 앱 지갑 가져오기에 같은 12단어를 넣으면 함께 쓸 수 있어요.",
+                                                ts: Date(), read: false), at: 0)
+                }
+            }
+        }
+    }
+
     /// '더 찾기' — 같은 방식으로 다음 번호들을 확인해서 이어 붙임
     func discoverMore(words: String, scan: WalletScan) async -> WalletScan {
         if Testnet.on { await MainActor.run { self.switchAccount("main#0") } }

@@ -23,7 +23,7 @@ Ouryn은 은행 없이도 내 돈이 온전히 내 것이 되는 **자기수탁(
 | Bitcoin | BTC | BTC |
 | Cardano | ADA, NIGHT | ADA |
 
-- **받기**: 네트워크·코인별 주소와 QR, 이미지 공유. 점을 원형으로 채운 Ouryn 전용 원형 QR(속은 표준 QR)도 지원합니다.
+- **받기**: 네트워크·코인별 주소와 QR, 이미지 공유. 점을 원형으로 채운 Ouryn 전용 원형 QR(속은 표준 QR)도 지원합니다. 솔라나 달러는 금액을 넣어 요청할 수 있고, 이 QR은 표준 Solana Pay라 Phantom 등 다른 솔라나 지갑도 금액까지 읽습니다.
 - **보내기**: 주소 붙여넣기 · 카메라 QR · 앨범 QR(ERC-681 토큰 송금 요청 포함). 수수료를 확인한 뒤 기기 본인 인증으로 서명합니다. 최근 보낸 주소와 이름 주소록을 저장합니다.
 - **여러 지갑 · 통장**: 지갑은 12단어 하나, 통장은 같은 12단어의 n번째 계정입니다. 다른 앱의 12·24단어를 가져올 때 Phantom·MetaMask 방식과 Trust Wallet·Ledger 방식의 0~4번 계정을 확인합니다(아래 '복구 지원 범위').
 - **테스트 통장**: Solana devnet · Ethereum Sepolia · Avalanche Fuji · Mantle Sepolia · Tron Nile · Bitcoin testnet4 · Cardano preprod. 이 통장에 있을 때만 앱 전체가 테스트넷으로 바뀌고 실제 통장 합계에는 들어가지 않습니다.

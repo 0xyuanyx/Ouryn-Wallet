@@ -280,6 +280,13 @@ struct CoinView: View {
             .padding(.top, 8)
             .padding(.bottom, 24)
 
+            // 아직 블록에 안 들어간 비트코인 입금 — 잔액에는 블록에 들어간 뒤에 더함
+            if id == "btc" && st.btcIncoming > 0 {
+                Notice(icon: "time-outline", color: C.amber, bg: C.amberSoft, title: "확인 중인 입금 \(qtyText(st.btcIncoming))",
+                       text: "아직 블록에 들어가지 않아서 잔액에는 더하지 않았어요. 보통 10분쯤 뒤 블록에 들어가면 잔액에 더해지고 내역에 남아요.")
+                    .padding(.bottom, 12)
+            }
+
             // 최근 5건 (트론 입금 기록은 과거 시각으로 늦게 들어올 수 있어서 시각순으로 다시 정렬)
             Card {
                 SectionTitle(title: "내역")
@@ -456,7 +463,7 @@ struct HomeEditView: View {
                 .padding(.bottom, 8)
 
                 List {
-                    ForEach(st.assetOrder, id: \.self) { id in
+                    ForEach(st.homeAssets, id: \.self) { id in
                         AssetRow(id: id)
                             .padding(.horizontal, 14)
                             .frame(height: 64)
@@ -467,7 +474,10 @@ struct HomeEditView: View {
                     }
                     .onMove { from, to in
                         haptic(.select)
-                        store.update { $0.assetOrder.move(fromOffsets: from, toOffset: to) }
+                        // 보이는 목록에서 옮기고, 숨긴 자산(준비 중인 이자 모으기)은 뒤에 그대로 붙여 둠
+                        var shown = st.homeAssets
+                        shown.move(fromOffsets: from, toOffset: to)
+                        store.update { s in s.assetOrder = shown + s.assetOrder.filter { !shown.contains($0) } }
                     }
                 }
                 .listStyle(.plain)

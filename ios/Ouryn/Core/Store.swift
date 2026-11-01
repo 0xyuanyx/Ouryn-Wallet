@@ -41,6 +41,9 @@ struct Tx: Codable, Identifiable, Equatable {
     var status: TxStatus = .done
     var feeUpper: String? = nil
     var via: String? = nil   // 보낸 곳 이름 (예: 업비트) — 주소를 모를 때
+    /// 보낸 거래가 블록에 들어갔는지 (완료로 볼 확정 깊이는 아직). 이더리움 계열·비트코인만 기록 (nil = 모름·아직)
+    /// 들어간 뒤에는 같은 네트워크의 다음 송금을 막지 않음. 새 칸이라 옵셔널 (예전 저장 상태를 그대로 읽게)
+    var included: Bool? = nil
 }
 
 extension Tx {
@@ -110,7 +113,10 @@ struct AppState: Codable, Equatable {
     var backedUp = false           // 복구 문구를 적어뒀는지
     var pin: String? = nil         // 예전 버전 호환용. 지금은 PinVault(Keychain)에 해시로 저장하고 여기는 비워 둠
     var lockEnabled = true
-    var pinOnSend = true
+    var pinOnSend = true            // 예전 송금 화면(쓰지 않음)의 설정. 실제 송금은 pinBeforeSend 를 따름
+    /// '보낼 때 비밀번호도 확인' — 켜면 Face ID 앞에 간편 비밀번호도 물음. 새로 생긴 설정이라 예전 저장 상태엔 없음(nil = 꺼짐)
+    /// AppState 는 저장된 JSON 을 그대로 읽어서, 새 칸은 꼭 옵셔널로 둬야 예전 상태를 읽다 초기화되지 않음
+    var pinBeforeSend: Bool? = nil
     var bio = false
     var hide = false
     var unit = "krw"
@@ -149,6 +155,18 @@ extension AppState {
     var dailyInterest: Double { savings.principal * savings.apy / 100 / 365 }
     var todayKrw: Double { COIN_IDS.reduce(0) { $0 + coinTodayKrw($1) } + dailyInterest * RATE }
     var grandTotal: Double { walletTotal + savings.principal + coinsUsd }
+    /// 아직 블록에 안 들어간 비트코인 입금 (잔액에는 블록에 들어간 뒤에 더함)
+    var btcIncoming: Double {
+        guard let raw = networkBalances?[WalletNetwork.bitcoin.rawValue]?["btc_incoming"] else { return 0 }
+        return NSDecimalNumber(decimal: ExactAmount.display(raw: raw, decimals: 8)).doubleValue
+    }
+    /// '보낼 때 비밀번호도 확인' 켜짐 여부 (설정 화면 토글이 쓰는 값)
+    var pinBeforeSendOn: Bool {
+        get { pinBeforeSend ?? false }
+        set { pinBeforeSend = newValue }
+    }
+    /// 홈에 보여줄 자산 순서 — '이자 모으기'는 아직 준비 중이라 넣어 둔 돈이 있을 때만 (예전 버전 상태)
+    var homeAssets: [String] { assetOrder.filter { $0 != "savings" || savings.principal > 0 } }
     /// 돈도 내역도 없는 첫 상태 — 원화 환산이 아니라 개수로 판단 (시세를 못 받아도 코인이 있으면 빈 지갑 아님)
     var isEmptyWallet: Bool { !hasBalance && tx.isEmpty }
     /// 어느 네트워크든 뭐라도 있는지 (달러·코인·네트워크별 원장)
@@ -428,14 +446,23 @@ final class Store: ObservableObject {
         let receipts = await receiptJob
         let pending = await MainActor.run { self.st.tx.filter { $0.type == .send && $0.inFlight && !$0.hash.isEmpty } }
         var statuses: [String:TxStatus] = [:]
+        var included = Set<String>()   // 블록에 들어갔지만 아직 확정 깊이 전인 보낸 거래
         for tx in pending {
             guard let n = WalletNetwork(rawValue:tx.network) else { continue }
             let status:TxStatus?
             if n == .tron { status = try? await TronTransfer.status(tx.hash) }
             else if n == .solana { status = try? await SolanaTransferEngine.status(tx.hash) }
-            else if n == .bitcoin { status = try? await BitcoinTransfer.status(tx.hash) }
+            else if n == .bitcoin {
+                let p = try? await BitcoinTransfer.progress(tx.hash)
+                status = p?.status
+                if p?.included == true { included.insert(tx.id) }
+            }
             else if n == .cardano { status = try? await CardanoTransfer.status(tx.hash) }
-            else { status = try? await EVMTransfer.status(tx.hash,network:n) }
+            else {
+                let p = try? await EVMTransfer.progress(tx.hash,network:n)
+                status = p?.status
+                if p?.included == true { included.insert(tx.id) }
+            }
             if let status { statuses[tx.id] = status }
         }
         let retry = await MainActor.run { self.st.addrs == a && self.st.onboarded ? (self.st.pendingBroadcasts ?? []) : [] }
@@ -464,7 +491,7 @@ final class Store: ObservableObject {
             guard valid else { break }
             try? await TransferDispatcher.broadcast(SignedTransfer(id:pending.id,payload:payload),network:network)
         }
-        let finalStatuses = statuses, finalExpired = expired
+        let finalStatuses = statuses, finalExpired = expired, finalIncluded = included
         await MainActor.run {
             guard self.st.addrs == a, self.st.onboarded else { self.syncing = false; return }
             if quotes != nil { self.lastPriceAt = Date() }
@@ -478,6 +505,7 @@ final class Store: ObservableObject {
                     if let i = s.tx.firstIndex(where:{ $0.id == id }) {
                         // 아직 확인 중인데 72시간이 지났으면 '평소보다 늦음'
                         s.tx[i].status = status == .pending && stale.contains(id) ? .delayed : status
+                        if finalIncluded.contains(id) { s.tx[i].included = true }
                         if finalExpired.contains(id) {
                             let n = WalletNetwork(rawValue: s.tx[i].network)
                             s.tx[i].via = n == .bitcoin || n?.isEVM == true
@@ -529,7 +557,12 @@ final class Store: ObservableObject {
                 ledger["솔라나"] = ["sol": String(format:"%.0f", sol.sol * 1e9), "usdc": String(format:"%.0f", sol.usdc * 1e6), "usdt": String(format:"%.0f", sol.usdt * 1e6)]
                 dates["솔라나"] = Date(); errors.removeValue(forKey:"솔라나")
             }
-            if let btc = legacy.btc { ledger["비트코인"] = ["btc":String(format:"%.0f",btc*1e8)]; dates["비트코인"] = Date(); errors.removeValue(forKey:"비트코인") }
+            if let btc = legacy.btc {
+                // 블록에 들어간 잔액 + 아직 블록에 안 들어간 입금(btc_incoming, 따로 보여주기만 함)
+                var row = ["btc":String(format:"%.0f",btc*1e8)]
+                if let incoming = legacy.btcIncoming, incoming > 0 { row["btc_incoming"] = String(format:"%.0f",incoming*1e8) }
+                ledger["비트코인"] = row; dates["비트코인"] = Date(); errors.removeValue(forKey:"비트코인")
+            }
             if let cardano = legacy.cardano { ledger["카르다노"] = ["ada":String(format:"%.0f",cardano.ada*1e6),"night":String(format:"%.0f",cardano.night*1e6)]; dates["카르다노"] = Date(); errors.removeValue(forKey:"카르다노") }
             for result in results {
                 if let balances = result.balances { ledger[result.network.rawValue] = balances; dates[result.network.rawValue] = Date(); errors.removeValue(forKey:result.network.rawValue) }

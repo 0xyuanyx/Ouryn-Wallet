@@ -9,7 +9,11 @@ struct HistoryView: View {
     @EnvironmentObject var router: Router
     @State private var f = "all"
 
-    private let filters: [(String, String)] = [("all", "전체"), ("in", "받은 돈"), ("out", "보낸 돈"), ("interest", "이자")]
+    /// '이자'는 준비 중인 이자 모으기 기록이 있을 때만 (예전 버전 상태)
+    private func filters(_ st: AppState) -> [(String, String)] {
+        let base: [(String, String)] = [("all", "전체"), ("in", "받은 돈"), ("out", "보낸 돈")]
+        return st.tx.contains { $0.type == .interest } ? base + [("interest", "이자")] : base
+    }
 
     private func match(_ t: Tx) -> Bool {
         switch f {
@@ -25,7 +29,8 @@ struct HistoryView: View {
         let st = store.st
         let cal = Calendar.current
         let month = cal.component(.month, from: Date())
-        let inMonth = st.tx.filter { cal.component(.month, from: $0.ts) == month && $0.status == .done }
+        // 이번 달 = 올해의 이번 달 (작년 같은 달 내역이 섞이지 않게)
+        let inMonth = st.tx.filter { cal.isDate($0.ts, equalTo: Date(), toGranularity: .month) && $0.status == .done }
         let inSum = inMonth.filter { $0.type == .receive || $0.type == .interest }.reduce(0) { $0 + $1.amt }
         let outSum = inMonth.filter { $0.type == .send }.reduce(0) { $0 + $1.amt }
         var sections: [(String, [Tx])] = []
@@ -60,7 +65,7 @@ struct HistoryView: View {
                         if needCheck > 0 {
                             Pill(label: "확인 필요 \(needCheck)", active: f == "check") { f = "check" }
                         }
-                        ForEach(filters, id: \.0) { k, label in
+                        ForEach(filters(st), id: \.0) { k, label in
                             Pill(label: label, active: f == k) { f = k }
                         }
                     }
@@ -87,22 +92,22 @@ struct HistoryView: View {
 
 // MARK: - 카드
 
+/// 아직 출시 전인 카드 소개. 신청을 받아 둘 서버가 없어서 사전 신청은 받지 않음 (가짜 대기 순번·동의 없이 안내만)
 struct CardView: View {
     @EnvironmentObject var store: Store
-    @State private var open = false
-    @State private var agree = false
     @State private var tilt = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let st = store.st
-        let applied = st.card.status == "applied"
+        // 예전 버전에서 '사전 신청'을 누른 사람 (이 폰에만 기록됐고 어디에도 접수되지 않았음)
+        let appliedBefore = st.card.status == "applied"
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 0) {
                 TX("카드", .b, 26).padding(.top, 28)
 
                 ZStack {
-                    CardFace(width: 300, name: applied ? "발급 준비 중" : "내 이름")
+                    CardFace(width: 300, name: "내 이름")
                     if !reduceMotion { Sheen(every: 6, width: 90, opacity: 0.07) }
                 }
                 .frame(width: 300, height: 300 * 0.63)
@@ -112,8 +117,8 @@ struct CardView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 32)
 
-                TX(applied ? "신청해주셔서 고마워요" : "내 달러로\n바로 결제하세요", .b, 24, lh: 34)
-                TX(applied ? "사전 신청 \(grouped(Double(st.card.queue ?? 0)))번째예요. 발급이 시작되면 가장 먼저 알려드릴게요." : "지갑에 있는 달러가 결제할 때 원화로 바뀌어 나가요. 따로 충전할 필요 없어요.",
+                TX("내 달러로\n바로 결제하는 카드", .b, 24, lh: 34)
+                TX("지갑에 있는 달러가 결제할 때 원화로 바뀌어 나가는 카드를 준비하고 있어요.",
                    .r, 15, C.sub, lh: 22)
                     .padding(.top, 10)
 
@@ -131,16 +136,11 @@ struct CardView: View {
                     .padding(.top, 12)
                     .padding(.horizontal, 4)
 
-                if applied {
-                    Tap(action: { store.cancelCard(); toast("사전 신청을 취소했어요", "close-circle") }) {
-                        TX("사전 신청 취소하기", .r, 14, C.mute).underline(color: C.mute).padding(8)
-                    }
-                    .frame(maxWidth: .infinity)
+                Notice(icon: "information-circle", color: C.sub, bg: C.surface, title: "아직 신청을 받지 않아요",
+                       text: appliedBefore
+                           ? "예전에 누른 사전 신청은 이 폰에만 기록돼 있었고 어디에도 접수되지 않았어요. 신청은 출시 때 열어요."
+                           : "신청과 출시 알림은 출시 때 열어요.")
                     .padding(.top, 20)
-                } else {
-                    OButton("사전 신청하기") { agree = false; open = true }
-                        .padding(.top, 24)
-                }
             }
             .padding(20)
             .padding(.bottom, 12)
@@ -148,23 +148,6 @@ struct CardView: View {
         .background(C.bg.ignoresSafeArea())
         .onAppear {
             if !reduceMotion { withAnimation(Ease.standard(3).repeatForever(autoreverses: true)) { tilt = true } }
-        }
-        .oSheet($open, title: "카드 사전 신청", sub: "지금 신청하면 발급이 시작될 때 가장 먼저 알려드려요. 신청해도 비용은 없어요.") {
-            Tap(scale: 0.99, action: { haptic(.select); agree.toggle() }) {
-                HStack(spacing: 10) {
-                    Icon(agree ? "checkmark-circle" : "ellipse-outline", 24, agree ? C.blue : C.faint)
-                    TX("출시 알림과 안내 받기에 동의해요", .m, 15)
-                    Spacer()
-                }
-                .padding(.vertical, 12)
-            }
-            OButton("신청하기", disabled: !agree) {
-                store.applyCard()
-                open = false
-                haptic(.success)
-                toast("사전 신청이 완료됐어요")
-            }
-            .padding(.top, 12)
         }
     }
 }
@@ -241,16 +224,19 @@ struct MoreView: View {
                             (tt(st.accountName, .b, 18) + tt(" · \(st.currentWallet?.name ?? "Ouryn 지갑")", .m, 13, C.mute))
                                 .lineLimit(1)
                                 .padding(.top, 1)
+                            // 지갑 주소는 네트워크마다 달라서, 여기서 복사하는 건 솔라나 주소라고 밝힘 (다른 네트워크는 받기 화면에서)
                             Tap(action: {
                                 UIPasteboard.general.string = st.myAddr
                                 haptic(.success)
-                                toast("지갑 주소를 복사했어요")
+                                toast("솔라나 주소를 복사했어요 · 다른 네트워크는 받기에서", "copy-outline")
                             }) {
                                 HStack(spacing: 4) {
+                                    TX("솔라나", .m, 13, C.mute)
                                     AddrText(addr: st.myAddr, size: 14, base: C.mute)
                                     Icon("copy-outline", 13, C.mute)
                                 }
                             }
+                            .accessibilityLabel("솔라나 주소 복사")
                             .padding(.top, 4)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -279,8 +265,11 @@ struct MoreView: View {
                 }
 
                 Group1 {
-                    Item(icon: "card", label: "카드", sub: "출시 준비 중 · 사전 신청", value: st.card.status == "applied" ? "신청함" : nil) { router.push(.card) }
-                    Item(icon: "repeat", label: "자동 보내기", value: st.schedules.isEmpty ? nil : "\(st.schedules.count)건") { router.push(.schedules) }
+                    Item(icon: "card", label: "카드", sub: "출시 준비 중") { router.push(.card) }
+                    // 자동 보내기는 아직 없음 → 예전 버전에서 만든 일정이 남아 있을 때만 보여줌
+                    if !st.schedules.isEmpty {
+                        Item(icon: "repeat", label: "자동 보내기", sub: "준비 중 · 저절로 보내지지 않아요", value: "\(st.schedules.count)건") { router.push(.schedules) }
+                    }
                     Item(icon: "notifications", label: "알림", value: st.unread > 0 ? "새 알림 \(st.unread)" : nil, valueColor: C.blueText, last: true) { router.push(.notifications) }
                 }
 
@@ -338,9 +327,9 @@ struct MoreView: View {
                             }
                         }), noHaptic: true)
                     }
-                    Toggle1(icon: "shield-checkmark", label: "보낼 때 비밀번호도 확인", isOn: guarded(\.pinOnSend), last: true)
-                    TX(st.pinOnSend ? "보낼 때마다 간편 비밀번호를 입력한 뒤 \(bio.ok ? bio.label : "본인 확인")으로 서명해요."
-                                    : "\(bio.ok ? bio.label : "본인 확인")만으로 서명해요. 얼굴 등록이 바뀌었거나 생체인증이 없으면 비밀번호도 물어요.",
+                    Toggle1(icon: "shield-checkmark", label: "보낼 때 비밀번호도 확인", isOn: guarded(\.pinBeforeSendOn), last: true)
+                    TX(st.pinBeforeSendOn ? "보낼 때마다 간편 비밀번호를 입력한 뒤 \(bio.ok ? bio.label : "본인 확인")으로 서명해요."
+                                          : "\(bio.ok ? bio.label : "본인 확인")만으로 서명해요. 얼굴 등록이 바뀌었거나 생체인증이 없으면 비밀번호도 물어요.",
                        .r, 13, C.mute, lh: 18)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 16)

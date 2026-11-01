@@ -68,13 +68,16 @@ struct ReceiveView: View {
     @State private var riskOK = false   // 12단어를 안 적은 지갑인 걸 알고 주소를 보기로 함
 
     private var addr: String { store.st.address(net: network.rawValue) ?? "" }
-    /// 금액 요청은 솔라나 달러만 (Ouryn 짧은 형식)
+    /// 금액 요청은 솔라나 달러만 (표준 Solana Pay 형식 → Phantom 등 다른 솔라나 지갑도 금액까지 읽음)
     private var canRequest: Bool { !Testnet.on && network == .solana && ["usdc", "usdt"].contains(asset) }
-    /// 원형 QR 내용 — 솔라나는 짧은 형식(qrPayload), 나머지는 주소 그대로 (어느 지갑이든 읽음)
+    /// 금액을 넣은 요청 QR 인지 — 내용이 길어서 원형 대신 네모 표준 QR 로 그림 (점이 작아져도 잘 읽히게)
+    private var amountQR: Bool { canRequest && req > 0 }
+    /// QR 내용 — 솔라나는 "solana:<주소>" (금액이 있으면 표준 Solana Pay), 나머지는 주소 그대로 (어느 지갑이든 읽음)
     /// 테스트 통장은 테스트넷 표시가 들어간 Ouryn 형식 → 찍는 쪽에서 테스트 통장으로만 보내게
     private var qrValue: String {
         if Testnet.on { return Testnet.payload(to: addr, network: network) }
-        return network == .solana ? qrPayload(to: addr, usd: req > 0 ? req : nil, asset: asset) : addr
+        if amountQR { return payURI(to: addr, usd: req, asset: asset) }
+        return network == .solana ? "solana:\(addr)" : addr
     }
     private var netName: String { Testnet.on ? Testnet.name(network) : "\(network.rawValue) 네트워크" }
     /// 공유 링크 — 금액이 있으면 표준 Solana Pay
@@ -229,6 +232,14 @@ struct ReceiveView: View {
                     Notice(icon: "alert-circle", color: C.red, bg: C.redSoft, title: "주소를 보여드릴 수 없어요",
                            text: "주소 계산 자체 검사를 통과하지 못했어요. 잘못된 주소로 돈이 가지 않도록 막아뒀어요. 앱을 업데이트해주세요.")
                         .padding(.top, 28)
+                } else if amountQR {
+                    // 금액 요청: 표준 Solana Pay → 다른 솔라나 지갑으로 찍어도 받는 주소·코인·금액이 채워짐
+                    AddressQRView(payload: qrValue)
+                        .background(RoundedRectangle(cornerRadius: 20).fill(Color.white))
+                        .padding(.top, 28)
+                        .accessibilityLabel("금액 요청 QR")
+                    TX("Phantom 등 다른 솔라나 지갑으로 찍어도 금액까지 채워져요", .r, 13, C.mute, align: .center)
+                        .padding(.top, 10)
                 } else {
                     RoundQR(value: qrValue, size: 250)
                         .padding(18)
@@ -269,6 +280,12 @@ struct ReceiveView: View {
 
                 if let balance = store.st.balance(asset, net: network.rawValue) {
                     TX("지금 잔액 \(qtyText(balance)) · \(asset.uppercased())", .r, 13, C.mute).padding(.top, 10)
+                }
+                // 비트코인: 아직 블록에 안 들어간 입금은 잔액과 따로 '확인 중'으로 (보낸 쪽이 보냈는데 안 보인다고 걱정하지 않게)
+                if network == .bitcoin && store.st.btcIncoming > 0 {
+                    TX("확인 중인 입금 \(qtyText(store.st.btcIncoming)) · BTC · 블록에 들어가면 잔액에 더해져요", .r, 13, C.amber, align: .center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 6)
                 }
                 if let url = network.explorer(address: addr) {
                     Tap(action: { openURL(url) }) {
@@ -541,7 +558,7 @@ struct ScanView: View {
         }
         switch cam {
         case .none: return "사진 속 QR을 불러오거나 체험용으로 이어가요"
-        case .denied: return "설정에서 카메라를 켜면 QR을 찍을 수 있어요"
+        case .denied: return "설정에서 카메라를 켜거나, 사진 속 QR을 불러와주세요"
         default: return "금액을 요청한 QR이면 금액까지 채워져요"
         }
     }
@@ -792,8 +809,11 @@ struct ScanView: View {
             }
         } else if cam != .checking {
             VStack(spacing: 10) {
-                Tap(action: { handle(nil, nil, demo: SCAN_DEMO) }) {
-                    pill("sparkles-outline", "체험용 QR 인식하기", strong: true)
+                // 체험용 QR 은 카메라가 아예 없는 기기(시뮬레이터 등)에서만. 실제 폰에서 권한을 끈 경우엔 보여주지 않음
+                if cam == .none {
+                    Tap(action: { handle(nil, nil, demo: SCAN_DEMO) }) {
+                        pill("sparkles-outline", "체험용 QR 인식하기", strong: true)
+                    }
                 }
                 if cam == .denied {
                     Tap(action: {

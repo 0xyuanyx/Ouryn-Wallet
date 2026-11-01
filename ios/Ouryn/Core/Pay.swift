@@ -36,7 +36,7 @@ private func plainAmount(_ v: Double) -> String {
     return s
 }
 
-/// 공유용 표준 링크 (Solana Pay) — 다른 솔라나 지갑도 금액까지 읽음. 길어서 QR 에는 안 씀
+/// 금액 요청 표준 링크 (Solana Pay) — 다른 솔라나 지갑도 금액까지 읽음. 공유 링크와 금액 요청 QR 에 씀
 func payURI(to: String, usd: Double?, asset: String? = "usdc") -> String {
     guard let u = usd, u > 0 else { return "solana:\(to)" }
     var q = ["amount=\(plainAmount(u))"]
@@ -45,14 +45,8 @@ func payURI(to: String, usd: Double?, asset: String? = "usdc") -> String {
     return "solana:\(to)?" + q.joined(separator: "&")
 }
 
-/// 원형 QR 에 넣는 짧은 내용 — 짧을수록 점이 크고 적어짐
-/// - 금액 없음: "solana:<주소>" (표준 → 어느 솔라나 지갑이든 읽음, 37칸)
-/// - 금액 있음: "ouryn:<주소>?a=12.5&t=c" (Ouryn 전용 짧은 형식, 41칸)
-///   표준 형식은 토큰 주소(44자) 때문에 53칸까지 커져서 점이 자글자글해짐
-func qrPayload(to: String, usd: Double?, asset: String = "usdc") -> String {
-    guard let u = usd, u > 0 else { return "solana:\(to)" }
-    return "ouryn:\(to)?a=\(plainAmount(u))&t=\(asset == "usdt" ? "t" : "c")"
-}
+// 예전 버전은 금액 요청 QR 을 Ouryn 전용 짧은 형식("ouryn:<주소>?a=12.5&t=c")으로 만들었음
+// 다른 지갑이 못 읽어서 지금은 표준 Solana Pay 로 만들고, 이미 퍼진 예전 QR 을 위해 읽기(parseOuryn)만 남겨 둠
 
 /// QR·붙여넣기에서 읽은 글자 → 요청. 그냥 주소만 있어도 됨
 func parsePay(_ raw: String) -> PayRequest? {

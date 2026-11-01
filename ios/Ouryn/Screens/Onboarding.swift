@@ -7,10 +7,13 @@ import LocalAuthentication
 // 이 폰에 키가 남아 있으면(앱을 지웠다 다시 깔았을 때): welcome → oldpin(예전 비밀번호) → (bio) → making
 //   예전 비밀번호를 잊었으면 12단어 입력 → 같은 지갑이면 reopen(새 비밀번호), 다른 지갑이면 바꾸기 경고
 // 백업 없음: where → none (자기주권 설명)
+// 12단어를 적는 도중(done·show·quiz) 앱을 벗어나면 메모리의 12단어를 버리고 resume 으로
+//   → 방금 정한 비밀번호(5번까지) + Keychain 에서 다시 꺼내기(생체인증 항목이면 Face ID) 뒤에만 다시 보여줌
 
 struct OnboardingView: View {
     @EnvironmentObject var store: Store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var step = "welcome"
     @State private var mode = "new"        // new | restore | existing(예전 비밀번호로) | reopen(같은 12단어로)
@@ -28,6 +31,8 @@ struct OnboardingView: View {
     @State private var quizIndex = 0
     @State private var picked: String? = nil
     @State private var quizBad = false
+    @State private var resumeTries = 0
+    private static let resumeLimit = 5
     private var hasOld: Bool { store.hasSavedKey }
 
     private var phase: String { step == "done" ? "making" : step }
@@ -73,6 +78,13 @@ struct OnboardingView: View {
         .onChange(of: step) { _, s in
             if s == "making" { makeKeys() }
             if s == "quiz" { startQuiz() }
+        }
+        // 아직 앱 잠금이 없는 단계라서, 12단어를 적는 도중 앱을 벗어나면 단어를 지우고 다시 본인 확인
+        .onChange(of: scenePhase) { _, p in
+            guard p != .active, mode == "new", ["done", "show", "quiz"].contains(step) else { return }
+            WalletKeys.clearFresh()
+            picked = nil
+            step = "resume"
         }
         .oSheet($overwriteOpen, title: "이 폰에 이미 지갑이 있어요",
                 sub: "새로 만들면 이 폰에 있던 지갑 열쇠는 지워져요. 그 지갑의 돈은 복구 문구로만 다시 꺼낼 수 있어요.") {
@@ -136,7 +148,8 @@ struct OnboardingView: View {
 
     private func finish(backedUp: Bool) {
         guard let a = addrs else { return }
-        guard store.finishOnboarding(addrs: a, restored: mode == "restore" || mode == "reopen", pin: pin, bio: useB, backedUp: backedUp) else {
+        guard store.finishOnboarding(addrs: a, restored: mode == "restore" || mode == "reopen", pin: pin, bio: useB, backedUp: backedUp,
+                                     keepLock: mode == "existing") else {
             haptic(.error)
             toast("비밀번호를 저장하지 못했어요. 다시 시도해주세요", "alert-circle")
             return
@@ -165,6 +178,10 @@ struct OnboardingView: View {
             PinPad(title: "이 폰에서 쓰던 간편 비밀번호", sub: "지갑을 열려면 예전 비밀번호가 필요해요", length: PinVault.length, onComplete: { p in
                 let r = store.checkPin(p)
                 guard case .ok = r else { return r }
+                // 10번 넘게 틀린 뒤에 맞힌 비밀번호는 바뀐 Face ID·생체인증 없는 지갑을 여는 데 쓰지 않음 → 12단어로
+                if PinVault.hardLocked && (Biometry.changed() || !WalletKeys.isBiometric("main")) {
+                    return .message("비밀번호를 여러 번 틀려서 지금은 12단어로만 열 수 있어요")
+                }
                 pin = p
                 step = bio.ok ? "bio" : "making"
                 return .ok
@@ -183,6 +200,7 @@ struct OnboardingView: View {
             }, header: { Logo(size: 48) })
             .id("pin2")
         case "bio": bioStep
+        case "resume": resumeStep
         default:
             LogoStage(done: step == "done",
                       loadingTitle: mode == "new" ? "나만의 지갑을 만들고 있어요" : "지갑을 불러오고 있어요",
@@ -271,7 +289,7 @@ struct OnboardingView: View {
                     TX("영어 단어 사이는 띄어 써주세요. 입력한 단어는 이 폰 밖으로 나가지 않아요.", .r, 15, C.sub, lh: 22).padding(.top, 10)
                     Field(text: $words, placeholder: "apple banana …").padding(.top, 24)
                     HStack {
-                        TX("\(list.count)/12", .m, 13, countOk ? C.green : C.mute)
+                        TX("\(list.count)/\(list.count > 12 ? 24 : 12)", .m, 13, countOk ? C.green : C.mute)
                         Spacer()
                         Tap(action: {
                             if let t = UIPasteboard.general.string {
@@ -362,6 +380,28 @@ struct OnboardingView: View {
         }
         .padding(.horizontal, 24)
         .padding(.bottom, 12)
+    }
+
+    // 새 지갑: 12단어를 적는 도중 앱을 벗어났다 돌아옴
+    private var resumeStep: some View {
+        let blocked = resumeTries >= Self.resumeLimit
+        return PinPad(title: "방금 정한 간편 비밀번호",
+                      sub: blocked ? "여러 번 틀렸어요. 앱을 완전히 닫고 다시 열어 '이 폰에 있던 지갑'으로 열어주세요"
+                                   : "적던 12단어를 다시 보려면 본인 확인이 필요해요",
+                      onComplete: { p in
+            guard resumeTries < Self.resumeLimit else { return .message("여러 번 틀려서 더 입력할 수 없어요") }
+            guard p == pin else {
+                resumeTries += 1
+                return resumeTries >= Self.resumeLimit ? .message("여러 번 틀려서 더 입력할 수 없어요") : .wrong
+            }
+            resumeTries = 0
+            Task { @MainActor in
+                if await WalletKeys.reloadFresh(reason: "12단어 다시 보기") { step = "show" }
+                else { toast("12단어를 다시 꺼내지 못했어요. 다시 시도해주세요", "alert-circle") }
+            }
+            return .ok
+        }, header: { Logo(size: 48) })
+        .id("resume")
     }
 
     // 새 지갑: 제대로 적었는지 두 단어 확인

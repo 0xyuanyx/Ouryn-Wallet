@@ -53,7 +53,9 @@ enum TronTransfer {
   let chain = try await MultiChainAPI.request(base + "/wallet/getchainparameters",body:[:])
   guard let parameters = chain["chainParameter"] as? [[String:Any]],
         let energyCost = parameters.first(where:{ $0["key"] as? String == "getEnergyFee" })?["value"] as? NSNumber,
-        let bandwidthCost = parameters.first(where:{ $0["key"] as? String == "getTransactionFee" })?["value"] as? NSNumber else { throw TransferError.invalid("현재 수수료를 확인하지 못했어요") }
+        let bandwidthCost = parameters.first(where:{ $0["key"] as? String == "getTransactionFee" })?["value"] as? NSNumber,
+        // 서버 숫자는 곱하기 전에 범위부터 확인 (현재 메인넷: 에너지 100 sun · 대역폭 1000 sun)
+        (1...10_000).contains(energyCost.int64Value), (1...100_000).contains(bandwidthCost.int64Value) else { throw TransferError.invalid("현재 수수료를 확인하지 못했어요") }
   var maxFee = bandwidthCost.int64Value * 1000
   var parameter: String? = nil
   var draft: [String:Any]

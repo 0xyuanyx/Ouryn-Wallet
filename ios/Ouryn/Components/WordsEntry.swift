@@ -34,7 +34,7 @@ struct WordsEntry: View {
                         .padding(.top, 10)
                     Field(text: $words, placeholder: "apple banana …", mono: true).padding(.top, 24)
                     HStack {
-                        TX("\(l.count)/12", .m, 13, countOk ? C.green : C.mute)
+                        TX("\(l.count)/\(l.count > 12 ? 24 : 12)", .m, 13, countOk ? C.green : C.mute)
                         Spacer()
                         Tap(action: {
                             if let t = UIPasteboard.general.string {

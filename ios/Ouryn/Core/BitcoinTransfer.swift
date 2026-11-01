@@ -31,9 +31,11 @@ enum BitcoinTransfer {
   // 테스트넷 tb1 주소는 같은 스크립트의 bc1 표기로 바꿔 Wallet Core 에 넘김
   let script = BitcoinScript.lockScriptForAddress(address:Testnet.btcCore(owner),coin:.bitcoin).data
   var utxos = [BitcoinUnspentTransaction]()
-  for row in available.prefix(50) {
-   guard (row["status"] as? [String:Any])?["confirmed"] as? Bool == true,
-         let hash = row["txid"] as? String, let index = row["vout"] as? Int, let value = row["value"] as? Int64 else { continue }
+  // 확정된 코인만 먼저 고른 뒤 큰 것부터 50개 (앞쪽에 미확정 코인이 많아도 뒤의 확정 코인을 못 쓰는 일 없게)
+  let confirmed = available.filter { ($0["status"] as? [String:Any])?["confirmed"] as? Bool == true }
+   .sorted { (($0["value"] as? Int64) ?? 0) > (($1["value"] as? Int64) ?? 0) }
+  for row in confirmed.prefix(50) {
+   guard let hash = row["txid"] as? String, let index = row["vout"] as? Int, let value = row["value"] as? Int64 else { continue }
    let hex = String(data:try await get("/tx/" + hash + "/hex"),encoding:.utf8) ?? ""
    guard let data = Data(hexString:hex) else { throw TransferError.invalid("이전 거래 검증에 실패했어요") }
    let evidence = try BitcoinEvidence.parse(data)
@@ -72,9 +74,13 @@ enum BitcoinTransfer {
   }
   throw TransferError.invalid("전파 응답을 확인하지 못했어요")
  }
+ /// 블록에 들어간 뒤 network.confirmations(3) 블록이 쌓여야 완료. 그 전에는 확인 중
  static func status(_ hash:String) async throws -> TxStatus {
   let json = try JSONSerialization.jsonObject(with:await get("/tx/" + hash + "/status")) as? [String:Any]
-  return json?["confirmed"] as? Bool == true ? .done : .pending
+  guard json?["confirmed"] as? Bool == true, let height = (json?["block_height"] as? NSNumber)?.intValue else { return .pending }
+  let tipText = String(data:try await get("/blocks/tip/height"),encoding:.utf8)?.trimmingCharacters(in:.whitespacesAndNewlines) ?? ""
+  guard let tip = Int(tipText), tip >= height else { return .pending }
+  return tip - height + 1 >= WalletNetwork.bitcoin.confirmations ? .done : .pending
  }
 }
 extension WalletKeys {

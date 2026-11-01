@@ -9,7 +9,10 @@ import CommonCrypto
 // - 틀린 횟수·마지막으로 틀린 시각도 같은 항목에 저장 → 앱을 껐다 켜도, 지웠다 다시 깔아도 초기화되지 않음
 //   (iOS Keychain 은 앱을 지워도 남음. 복구 문구도 그래서 '이 폰에 있던 지갑 열기'가 가능함)
 // - 5번까지는 그냥 다시 입력, 그 뒤로는 틀릴 때마다 기다리는 시간이 늘어남. 지갑을 지우지는 않음
-// - 10번 틀리면 hardLocked: 새 비밀번호를 정하거나 12단어로 확인할 때까지 비밀번호만으로는 보낼 수 없음
+//   기다리는 시간은 폰 시계와 부팅 뒤 흐른 시간(시계 설정과 무관) 중 짧은 쪽으로 셈 → 날짜를 앞으로 돌려도 줄지 않음
+// - 10번 틀리면 hardLocked: 12단어(또는 등록이 그대로인 Face ID)로 확인할 때까지
+//   비밀번호만으로는 보내기·복구 문구·비밀번호 바꾸기·지우기·바뀐 Face ID 받아들이기를 할 수 없음
+//   새 비밀번호를 저장해도 이 잠금은 풀리지 않음 (clearHardLock 으로만 풂)
 
 enum PinVault {
     private static let service = "com.yuanyx.ouryn.pin"
@@ -26,6 +29,7 @@ enum PinVault {
         var lastFail: Date? = nil
         var length: Int? = nil   // 없으면 예전 6자리
         var locked: Bool? = nil  // hardLocked
+        var lastFailMono: TimeInterval? = nil   // 마지막으로 틀린 때의 부팅 뒤 경과 시간 (잠자기 포함). 없으면 예전 기록
     }
 
     enum Check: Equatable {
@@ -43,10 +47,10 @@ enum PinVault {
     /// 10번 넘게 틀린 뒤 아직 새 비밀번호·12단어로 풀지 않음
     static var hardLocked: Bool { read()?.locked == true }
 
-    /// 12단어로 본인 확인을 마쳤을 때
+    /// 12단어(또는 등록이 그대로인 Face ID)로 본인 확인을 마쳤을 때만
     static func clearHardLock() {
         guard var r = read(), r.locked == true || r.fails > 0 else { return }
-        r.locked = nil; r.fails = 0; r.lastFail = nil
+        r.locked = nil; r.fails = 0; r.lastFail = nil; r.lastFailMono = nil
         _ = write(r)
     }
 
@@ -90,10 +94,24 @@ enum PinVault {
     private static func waitLeft(_ r: Record) -> TimeInterval? {
         let d = delay(after: r.fails)
         guard d > 0, let last = r.lastFail else { return nil }
-        let now = Date()
-        if now < last { return d }   // 시계를 되돌렸으면 처음부터 다시 기다림
-        let left = last.addingTimeInterval(d).timeIntervalSince(now)
+        let passed = elapsed(wall: Date().timeIntervalSince(last), mono: r.lastFailMono, nowMono: monotonicNow())
+        let left = d - passed
         return left > 0 ? left : nil
+    }
+
+    /// 마지막으로 틀린 뒤 '확실히' 흐른 시간
+    /// - wall: 폰 시계 기준 (음수면 시계를 되돌림). 사용자가 바꿀 수 있어서 이것만으로는 믿지 않음
+    /// - mono: 틀린 때의 부팅 뒤 경과 시간. 지금 값이 더 작으면 그 사이 재부팅 → 부팅 뒤 흐른 시간만 확실함
+    /// 둘 다 있으면 짧은 쪽 → 시계를 앞으로 돌려도 대기가 줄지 않음
+    static func elapsed(wall: TimeInterval, mono: TimeInterval?, nowMono: TimeInterval) -> TimeInterval {
+        guard let mono else { return max(0, wall) }   // 예전 기록: 시계를 되돌렸으면 처음부터 다시 기다림
+        let sure = nowMono >= mono ? nowMono - mono : nowMono
+        return wall < 0 ? sure : min(wall, sure)
+    }
+
+    /// 부팅 뒤 흐른 시간 (초). 폰이 잠자는 동안에도 늘고, 날짜·시간 설정을 바꿔도 변하지 않음
+    static func monotonicNow() -> TimeInterval {
+        TimeInterval(clock_gettime_nsec_np(CLOCK_MONOTONIC)) / 1_000_000_000
     }
 
     /// 비밀번호 확인. 틀리면 횟수를 Keychain 에 먼저 기록한 뒤 결과를 돌려줌
@@ -106,6 +124,7 @@ enum PinVault {
         }
         r.fails += 1
         r.lastFail = Date()
+        r.lastFailMono = monotonicNow()
         if r.fails >= hardLockAfter { r.locked = true }
         _ = write(r)
         if let w = waitLeft(r) { return .wait(w) }
@@ -118,13 +137,16 @@ enum PinVault {
         return same(h, r.hash)
     }
 
-    /// 새 비밀번호 저장 (틀린 횟수도 초기화)
+    /// 새 비밀번호 저장 (틀린 횟수는 초기화)
+    /// hardLocked 는 그대로 이어받음 — 비밀번호를 바꾸는 것만으로 10번 실패 잠금이 풀리지 않게. 풀려면 먼저 clearHardLock
     @discardableResult
     static func set(_ pin: String) -> Bool {
         var salt = Data(count: 16)
         let ok = salt.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
         guard ok == errSecSuccess, let h = derive(pin, salt: salt) else { return false }
-        return write(Record(salt: salt, hash: h, length: pin.count))
+        var record = Record(salt: salt, hash: h, length: pin.count)
+        record.locked = read()?.locked == true ? true : nil
+        return write(record)
     }
 
     @discardableResult

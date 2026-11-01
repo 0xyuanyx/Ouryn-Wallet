@@ -39,6 +39,7 @@ struct FromExchangeView: View {
     @State private var copied = false
     @State private var netOk = false
     @State private var depId: String? = nil
+    @State private var riskOK = false   // 12단어를 안 적은 지갑인 걸 알고 계속하기로 함
     @State private var now = Date()
     private let tick = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
@@ -59,6 +60,20 @@ struct FromExchangeView: View {
         Group {
             if step == "waiting" || step == "done" {
                 waitingView
+            } else if BackupFirstGate.needed(store.st) && !riskOK {
+                // 받는 주소를 알려주기 전에 12단어부터
+                VStack(spacing: 0) {
+                    HStack {
+                        Tap(action: { dismiss() }) { Icon("close", 26, C.text).padding(16) }
+                            .padding(-12)
+                            .accessibilityLabel("닫기")
+                        Spacer()
+                    }
+                    .frame(height: 52)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+                    BackupFirstGate { riskOK = true }
+                }
             } else {
                 flowView
             }

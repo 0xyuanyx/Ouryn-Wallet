@@ -2,7 +2,9 @@ import SwiftUI
 
 /// 비밀번호를 잊었을 때 — 본인 확인 → 새 4자리
 /// - Face ID: 등록이 그대로일 때만 (등록이 바뀌었으면 남의 얼굴일 수 있어서 12단어만)
+///   인증에 쓴 등록 상태를 그 자리에서 다시 비교 (화면을 띄워 둔 사이 새로 등록해도 통과 못 함)
 /// - 12단어: 이 폰에 있는 지갑 중 하나와 맞으면 (Keychain 을 읽지 않고 지문·주소로 비교)
+/// 두 방법 모두 10번 실패 잠금(hardLocked)도 풂 — 비밀번호 추측이 아닌 다른 본인 확인이라서
 /// 앱을 지우고 다시 깔지 않아도 돼서 내역·주소록이 그대로 남음
 struct PinResetView: View {
     @EnvironmentObject var store: Store
@@ -77,7 +79,9 @@ struct PinResetView: View {
                 if faceOk {
                     OButton("\(bio.label)으로 확인") {
                         // 생체인증만 (아이폰 암호로 넘어가지 않음)
-                        Bio.auth("비밀번호 다시 정하기") { ok in if ok { step = "new" } }
+                        Bio.authTrusted("비밀번호 다시 정하기") { ok in
+                            if ok { PinVault.clearHardLock(); step = "new" } else { bioChanged = Biometry.changed() }
+                        }
                     }
                 }
                 OButton("12단어로 확인", kind: faceOk ? .secondary : .primary) { step = "words" }

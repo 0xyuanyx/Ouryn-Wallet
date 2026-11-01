@@ -77,7 +77,8 @@ struct TxDetailView: View {
             InfoRow(label: "탐색기", value: "—", valueColor: C.faint, last: !byHash)
         }
         if !byHash {
-            TX(t.type == .receive ? "잔액 증가로 확인한 입금이라 거래 번호가 없어요" : "거래 번호가 남아 있지 않아요", .r, 12, C.mute, lh: 17)
+            TX(t.type == .receive ? "잔액이 늘어난 것을 보고 남긴 기록이라 거래 번호가 없어요. 시각은 앱이 확인한 때이고, 그 사이 여러 번 받았거나 같이 보낸 돈이 있으면 실제 입금과 금액이 다를 수 있어요. 정확한 내역은 탐색기에서 확인해주세요."
+                                  : "거래 번호가 남아 있지 않아요", .r, 12, C.mute, lh: 17)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.bottom, 12)
                 .overlay(alignment: .bottom) { Rectangle().fill(C.line).frame(height: 1) }
@@ -688,9 +689,10 @@ struct RecoveryView: View {
     /// nil = 지금 통장의 지갑
     var walletId: String? = nil
     @State private var step = "warn"
-    /// 비밀번호 + Face ID 를 통과한 뒤에만 채움 (화면을 떠나면 비움)
+    /// 비밀번호 + Face ID 를 통과한 뒤에만 채움 (화면을 떠나거나 앱을 벗어나면 비움)
     @State private var words: [String] = []
     @State private var pinError: String? = nil
+    @Environment(\.scenePhase) private var scenePhase
 
     private var wallet: WalletBox? {
         let id = walletId ?? store.st.currentWallet?.id ?? "main"
@@ -702,6 +704,20 @@ struct RecoveryView: View {
     private var labeled: Bool { store.st.walletList.count > 1 || (wallet.map { !$0.isMain } ?? false) }
 
     var body: some View {
+        content
+            // 앱을 벗어나거나(앱 전환·알림 센터·전화 포함) 앱이 잠기면 꺼낸 12단어를 버리고, 다시 볼 때 처음부터 본인 확인
+            .onChange(of: scenePhase) { _, p in if p != .active { forget() } }
+            .onChange(of: store.locked) { _, l in if l { forget() } }
+    }
+
+    private func forget() {
+        guard step == "show" || step == "quiz" else { return }
+        words = []
+        pinError = nil
+        step = "pin"
+    }
+
+    @ViewBuilder private var content: some View {
         switch step {
         case "pin":
             PinPad(title: "간편 비밀번호를 입력해주세요", sub: "복구 문구를 보려면 본인 확인이 필요해요",
@@ -731,7 +747,7 @@ struct RecoveryView: View {
                         .padding(.top, 8)
                 } else {
                     TX("종이에 순서대로 적어주세요", .b, 24)
-                    TX("이 12단어만 있으면 어떤 폰, 어떤 지갑 앱(Phantom·MetaMask 등)에서든 지갑을 되찾을 수 있어요.", .r, 15, C.sub, lh: 22)
+                    TX("이 12단어가 있으면 새 폰에서도, 표준 경로를 쓰는 지갑 앱(Phantom·MetaMask 등)에서도 지갑을 되찾을 수 있어요. 앱마다 주소를 만드는 방식이 달라 일부 네트워크는 직접 찾아야 할 수 있어요.", .r, 15, C.sub, lh: 22)
                         .padding(.top, 8)
                 }
                 MnemonicGrid(words: words).padding(.top, 24)
@@ -947,6 +963,10 @@ struct MnemonicGrid: View {
                 toast("12단어를 캡처했다면 사진을 지우고 종이에만 남겨주세요", "alert-circle")
             }
             .accessibilityLabel(reveal ? words.joined(separator: " ") : "복구 문구, 꾹 누르면 보여요")
+            // VoiceOver 에서는 꾹 누르기가 어려워서 동작으로 보이기·가리기 (녹화·미러링 중이거나 앱이 비활성이면 안 보임)
+            .accessibilityAction(named: reveal ? "다시 가리기" : "단어 보기") {
+                if reveal { reveal = false } else if !captured && phase == .active { reveal = true }
+            }
             HStack(spacing: 6) {
                 Icon(captured ? "videocam-off-outline" : "finger-print", 16, captured ? C.red : (reveal ? C.green : C.mute))
                 TX(captured ? "화면 녹화·미러링 중에는 보여주지 않아요" : (reveal ? "손을 떼면 다시 가려져요" : "꾹 누르고 있는 동안만 보여요"),
@@ -988,6 +1008,10 @@ struct ChangePinView: View {
                 PinPad(title: "지금 쓰는 비밀번호", length: PinVault.length, onComplete: { p in
                     let r = store.checkPin(p)
                     guard case .ok = r else { return r }
+                    // 10번 넘게 틀린 뒤에 맞힌 비밀번호만으로는 바꾸지 않음 (바꾸면서 잠금이 풀리지 않게)
+                    if PinVault.hardLocked {
+                        return .message("비밀번호를 여러 번 틀려서 지금은 바꿀 수 없어요. 아래 '비밀번호를 잊었어요'로 본인 확인을 해주세요")
+                    }
                     step = "new"
                     return .ok
                 }, footer: {

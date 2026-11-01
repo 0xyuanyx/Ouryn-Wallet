@@ -4,6 +4,49 @@ import AVFoundation
 
 // src/screens/Receive.js, Scan.js, Nearby.js
 
+// MARK: - 받기 전 백업 확인
+
+/// 12단어를 안 적은 진짜 지갑으로 돈을 받기 전에 한 번 막고 알려줌
+/// 테스트 통장은 실제 돈이 아니라 제외. '위험을 알고 계속'을 고르면 그 화면을 닫을 때까지 다시 묻지 않음
+struct BackupFirstGate: View {
+    @EnvironmentObject var store: Store
+    @EnvironmentObject var router: Router
+    @Environment(\.dismiss) private var dismiss
+    let onContinue: () -> Void
+
+    /// 지금 통장이 진짜 통장이고, 그 지갑의 12단어를 아직 확인하지 않았는지
+    static func needed(_ st: AppState) -> Bool { !st.inTest && !st.walletBackedUp(st.currentWallet?.id ?? "main") }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ZStack { RoundedRectangle(cornerRadius: 18).fill(C.redSoft); Icon("warning", 28, C.red) }
+                        .frame(width: 56, height: 56)
+                    TX("받기 전에\n12단어를 먼저 적어주세요", .b, 26, lh: 36).padding(.top, 20)
+                    TX("이 지갑의 12단어를 아직 적지 않았어요. 폰이 고장 나거나 초기화되면, 이 주소로 받은 돈은 12단어 없이는 누구도 다시 꺼낼 수 없어요.",
+                       .r, 15, C.sub, lh: 22)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 10)
+                    TX("앱을 지웠다 다시 깔거나 폰을 바꿀 때도 12단어가 필요해요. 종이에 적고 두 단어 확인까지 마치면 이 안내는 다시 나오지 않아요.",
+                       .r, 15, C.sub, lh: 22)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 12)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 8)
+            }
+            OButton("12단어 먼저 적기") {
+                dismiss()
+                after(0.4) { router.push(.recovery) }
+            }
+            OButton("위험을 알고 주소 보기", kind: .ghost, action: onContinue).padding(.top, 8)
+        }
+        .padding(.horizontal, 24)
+        .padding(.bottom, 12)
+    }
+}
+
 // MARK: - 받기
 
 struct ReceiveView: View {
@@ -22,6 +65,7 @@ struct ReceiveView: View {
     @State private var open = false
     @State private var draft: Double = 0
     @State private var sharing = false
+    @State private var riskOK = false   // 12단어를 안 적은 지갑인 걸 알고 주소를 보기로 함
 
     private var addr: String { store.st.address(net: network.rawValue) ?? "" }
     /// 금액 요청은 솔라나 달러만 (Ouryn 짧은 형식)
@@ -84,7 +128,14 @@ struct ReceiveView: View {
             .padding(.top, 8)
 
             if showQR {
-                qrStep.transition(.move(edge: .trailing).combined(with: .opacity))
+                Group {
+                    if BackupFirstGate.needed(store.st) && !riskOK {
+                        BackupFirstGate { riskOK = true }
+                    } else {
+                        qrStep
+                    }
+                }
+                .transition(.move(edge: .trailing).combined(with: .opacity))
             } else {
                 ScrollView(showsIndicators: false) {
                     TokenNetworkPicker(
@@ -850,7 +901,17 @@ struct ScanView: View {
                             .background(Capsule().fill(C.surface2))
                             .padding(.top, 12)
                         }
-                        if let u = r.usd {
+                        if let q = r.qty, let a = r.asset {
+                            // 정확한 수량 요청 (ERC-681): 받는 사람·코인·네트워크·수량을 그대로 보여줌
+                            VStack(spacing: 4) {
+                                TX("\(q) \(a.uppercased()) 요청", .b, 20)
+                                TX("\(assetFullName(a)) · \(r.network ?? "") 네트워크", .r, 13, C.sub)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(RoundedRectangle(cornerRadius: 16).fill(C.surface2))
+                            .padding(.top, 16)
+                        } else if let u = r.usd {
                             VStack(spacing: 4) {
                                 TX("\(wonOf(u)) 요청", .b, 20)
                                 TX("\(assetFullName(r.asset ?? "usdc")) \(dollar(u)) · \(DOLLAR_NET) 네트워크", .r, 13, C.sub)
@@ -869,7 +930,7 @@ struct ScanView: View {
                                 .padding(.top, 14)
                         }
                         OButton(needTest ? "테스트 통장으로 바꾸고 보내기" : needReal ? "진짜 통장으로 바꾸고 보내기"
-                                : (r.usd != nil ? "금액 확인하고 보내기" : "보내기"), disabled: picking) {
+                                : (r.usd != nil || r.qty != nil ? "금액 확인하고 보내기" : "보내기"), disabled: picking) {
                             guard !picking else { return }; picking = true
                             if needTest { store.openTestAccount() } else if needReal { store.leaveTestAccount() }
                             invalidate(); onPick(r)

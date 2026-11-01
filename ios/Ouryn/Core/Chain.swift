@@ -90,8 +90,10 @@ enum ChainAPI {
         func part(_ k: String) -> Double {
             (num(dig(j, k, "funded_txo_sum")) ?? 0) - (num(dig(j, k, "spent_txo_sum")) ?? 0)
         }
-        // 확인된 것 + 아직 블록에 안 들어간 것(메모리풀)
-        return (part("chain_stats") + part("mempool_stats")) / 1e8
+        // 블록에 들어간 것만 잔액으로 셈. 아직 블록에 안 들어간(메모리풀) '들어오는' 돈은 바뀌거나 사라질 수 있어서
+        // 잔액·입금 완료·'들어왔어요'에 넣지 않고 블록에 들어간 뒤에 반영
+        // 메모리풀 합이 음수(보낸 거래가 기다리는 중 · 거스름돈 포함)일 때만 미리 반영해서, 보낸 직후 잔액이 그대로 보이지 않게
+        return (part("chain_stats") + min(0, part("mempool_stats"))) / 1e8
     }
 
     static func cardano(_ addr: String, on: Bool = true) async -> CardanoBal? {

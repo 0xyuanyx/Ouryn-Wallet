@@ -86,7 +86,10 @@ struct LockView: View {
     }
 
     private func tryBio() {
-        Bio.auth("앱 열기") { ok in if ok { unlock() } }
+        // 얼굴 등록이 그대로일 때만 연다. 화면을 띄워 둔 사이 새로 등록했으면 비밀번호로
+        Bio.authTrusted("앱 열기") { ok in
+            if ok { unlock() } else { bioChanged = Biometry.changed() }
+        }
     }
 
     private func unlock() {
@@ -129,17 +132,24 @@ struct BioButton: View {
 }
 
 /// 지우기처럼 되돌릴 수 없는 일 앞에서 간편 비밀번호 한 번 더 (얼굴 인식으로 대신하지 않음)
+/// strict: 10번 넘게 틀린 뒤에는(hardLocked) 맞힌 비밀번호도 받지 않음 → '비밀번호를 잊었어요'로 본인 확인부터
 struct PinGate: View {
     @EnvironmentObject var store: Store
     let title: String
     var sub: String? = nil
+    var strict = false
     let done: (Bool) -> Void
 
     var body: some View {
         PinPad(title: title, sub: sub, length: PinVault.length,
                onComplete: { p in
                    let r = store.checkPin(p)
-                   if case .ok = r { haptic(.success); done(true) }
+                   if case .ok = r {
+                       if strict && PinVault.hardLocked {
+                           return .message("비밀번호를 여러 번 틀려서 지금은 할 수 없어요. 잠금 화면의 '비밀번호를 잊었어요'로 다시 정해주세요")
+                       }
+                       haptic(.success); done(true)
+                   }
                    return r
                },
                header: { Logo(size: 48) },

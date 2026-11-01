@@ -256,7 +256,11 @@ final class Store: ObservableObject {
     private(set) var hasSavedKey = false
     private var preparing = false
 
-    private var awayAt: Date?
+    /// 백그라운드로 간 때 (부팅 뒤 경과 시간 — 날짜·시간 설정을 바꿔도 그대로)
+    private var awayAt: TimeInterval?
+    /// 앱을 벗어난 사이 폰이 잠겼는지 (잠겼다 풀렸으면 60초가 안 지났어도 앱을 잠금)
+    private var deviceLockedWhileAway = false
+    private var lockWatch: AnyCancellable?
     private var ticker: AnyCancellable?
     private var lastPriceAt = Date.distantPast
 
@@ -282,6 +286,9 @@ final class Store: ObservableObject {
         locked = s.onboarded && s.lockEnabled && (s.pin != nil || PinVault.exists)
         ticker = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
             .sink { [weak self] _ in self?.tick() }
+        lockWatch = NotificationCenter.default.publisher(for: UIApplication.protectedDataWillBecomeUnavailableNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.deviceLockedWhileAway = true }
     }
 
     @MainActor
@@ -352,22 +359,29 @@ final class Store: ObservableObject {
     }
 
     /// 새 비밀번호 저장. Keychain 저장이 실패하면 false (비밀번호를 앱 데이터에 평문으로 남기지 않음)
-    /// 본인 확인을 마친 흐름에서만 부름 → 틀린 횟수·hardLocked 초기화, 지금 Face ID 등록을 기준으로
+    /// 본인 확인을 마친 흐름에서만 부름 → 틀린 횟수 초기화
+    /// hardLocked 는 여기서 풀지 않음 (12단어·Face ID 로 확인한 흐름이 먼저 clearHardLock). 잠긴 동안은 바뀐 Face ID 도 받아들이지 않음
     @discardableResult
     func setPin(_ p: String) -> Bool {
         guard PinVault.set(p) else { return false }
         if st.pin != nil { update { $0.pin = nil } }
-        Biometry.accept()
+        if !PinVault.hardLocked { Biometry.accept() }
         return true
     }
 
+    /// 앱을 벗어났다 돌아오면: 60초가 넘었거나 그 사이 폰이 잠겼으면 앱을 잠금
+    /// 시간은 부팅 뒤 경과 시간으로 재서 날짜·시간 설정을 바꿔도 잠금을 피할 수 없음
     func scenePhase(_ p: ScenePhase) {
-        if p == .background { awayAt = Date() }
-        if p == .active, let a = awayAt, Date().timeIntervalSince(a) > 60 {
-            if st.onboarded && st.lockEnabled && hasPin { locked = true }
+        if p == .background && awayAt == nil { awayAt = PinVault.monotonicNow() }
+        if p == .active, let a = awayAt {
+            let away = PinVault.monotonicNow() - a
+            if away > 60 || away < 0 || deviceLockedWhileAway {
+                if st.onboarded && st.lockEnabled && hasPin { locked = true }
+            }
         }
         if p == .active {
             awayAt = nil
+            deviceLockedWhileAway = false
             Task { await sync() }
         }
     }
@@ -738,10 +752,13 @@ final class Store: ObservableObject {
 
     /// 온보딩 끝: 실제 주소로 시작 (키는 이미 Keychain 에 있음)
     /// 비밀번호를 Keychain 에 저장하지 못하면 false — 평문으로 남기지 않고 다시 시도하게 함
+    /// keepLock: 이 폰에 있던 지갑을 예전 비밀번호로 연 경우. 그때는 10번 실패 잠금을 그대로 둠
+    /// (새로 만들었거나 12단어로 되찾은 지갑이면 예전 잠금 기록은 의미가 없어서 풂)
     @discardableResult
-    func finishOnboarding(addrs: ChainAddrs, restored: Bool, pin: String, bio: Bool, backedUp: Bool = false) -> Bool {
+    func finishOnboarding(addrs: ChainAddrs, restored: Bool, pin: String, bio: Bool, backedUp: Bool = false, keepLock: Bool = false) -> Bool {
+        if !keepLock { PinVault.clearHardLock() }
         guard PinVault.set(pin) else { return false }
-        Biometry.accept()
+        if !PinVault.hardLocked { Biometry.accept() }
         WalletKeys.clearFresh()
         var s = AppState()
         s.addrs = addrs

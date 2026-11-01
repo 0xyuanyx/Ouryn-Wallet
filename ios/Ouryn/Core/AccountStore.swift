@@ -398,13 +398,19 @@ extension Store {
         async let a = WalletDiscovery.scan(words: words, scheme: .standard, base: base)
         async let b = WalletDiscovery.scan(words: words, scheme: .alt, base: base)
         let std = await a, alt = await b
-        let pick = (alt.accounts.count > std.accounts.count
-                    || (alt.accounts.count == std.accounts.count && alt.usd > std.usd + 0.01)) ? alt : std
+        let altWins = alt.accounts.count > std.accounts.count
+            || (alt.accounts.count == std.accounts.count && alt.usd > std.usd + 0.01)
+        var pick = altWins ? alt : std
+        // 한 지갑은 한 방식만 가져옴 → 다른 방식에서만 보이는 쓰던 통장이 있으면 버리지 않고 알려줌
+        let other = altWins ? std : alt
+        pick.otherScheme = other.scheme
+        pick.otherUsed = WalletDiscovery.extraUsed(other, beyond: pick)
         if !pick.accounts.isEmpty { return pick }
         // 아무 기록도 없으면 첫 통장 하나만 (못 읽은 번호가 있었다면 그대로 알려줌)
         guard let addrs = WalletKeys.addrs(words: words, slot: KeySlot(wallet: "", index: 0, scheme: .standard)) else { return std }
         return WalletScan(scheme: .standard, accounts: [FoundAccount(index: 0, addrs: addrs, usd: 0, assets: [], nets: [], history: false, snap: .empty)],
-                          unchecked: Array(Set(std.unchecked + alt.unchecked)).sorted(), next: std.next)
+                          unchecked: Array(Set(std.unchecked + alt.unchecked)).sorted(), next: std.next,
+                          otherScheme: .alt, otherUsed: WalletDiscovery.extraUsed(alt, beyond: std))
     }
 
     /// '더 찾기' — 같은 방식으로 다음 번호들을 확인해서 이어 붙임
@@ -417,7 +423,8 @@ extension Store {
         return WalletScan(scheme: scan.scheme,
                           accounts: scan.accounts + more.accounts.filter { !known.contains($0.index) },
                           unchecked: scan.unchecked + more.unchecked,
-                          next: more.next)
+                          next: more.next,
+                          otherScheme: scan.otherScheme, otherUsed: scan.otherUsed)
     }
 }
 
@@ -441,11 +448,34 @@ struct WalletScan {
     var unchecked: [Int] = []
     /// '더 찾기'를 누르면 이 번호부터
     var next = 0
+    /// 고르지 않은 다른 방식과, 그 방식에서만 보이는 쓰던 통장 수 (같은 주소는 뺌)
+    var otherScheme: KeyScheme? = nil
+    var otherUsed = 0
     var usd: Double { accounts.reduce(0) { $0 + $1.usd } }
 }
 
 enum WalletDiscovery {
     static let batch = 5
+
+    /// other 방식에서 찾은 쓰던 통장 중, pick 방식의 어떤 통장과도 주소가 다른 네트워크를 쓰는 통장 수
+    /// (0번 통장의 이더리움·비트코인·카르다노·트론 주소는 두 방식이 같아서 겹치는 것은 세지 않음)
+    static func extraUsed(_ other: WalletScan, beyond pick: WalletScan) -> Int {
+        func addr(_ a: ChainAddrs, _ net: String) -> String? {
+            switch net {
+            case "솔라나": return a.solana
+            case "비트코인": return a.bitcoin
+            case "카르다노": return a.cardano
+            case "트론": return a.tron
+            default: return a.ethereum.lowercased()   // 이더리움 · 맨틀 · Avalanche C-Chain
+            }
+        }
+        return other.accounts.filter { o in
+            o.nets.contains { net in
+                let theirs = addr(o.addrs, net)
+                return !pick.accounts.contains { addr($0.addrs, net) == theirs }
+            }
+        }.count
+    }
 
     enum Probe { case used(FoundAccount), empty, unknown }
 

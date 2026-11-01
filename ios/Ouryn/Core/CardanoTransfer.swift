@@ -16,13 +16,26 @@ enum CardanoTransfer {
   let raw = try ExactAmount.parse(amount,decimals:6)
   guard let quantity = UInt64(raw), quantity > 0 else { throw TransferError.invalid("보낼 수량을 확인해주세요") }
   let tips = try await query("/tip")
-  guard let tip = tips.first, let slot = tip["abs_slot"] as? NSNumber, let epoch = tip["epoch_no"] as? Int else { throw TransferError.invalid("현재 블록을 확인하지 못했어요") }
+  // 서버 숫자는 계산 전에 범위부터 확인 (넘치면 앱이 멈추지 않고 송금만 막음)
+  guard let tip = tips.first, let slot = tip["abs_slot"] as? NSNumber, let epoch = tip["epoch_no"] as? Int,
+        slot.int64Value > 0, slot.uint64Value < 1_000_000_000_000, (0..<1_000_000).contains(epoch) else { throw TransferError.invalid("현재 블록을 확인하지 못했어요") }
   let protocols = try await query("/epoch_params?_epoch_no=\(epoch)")
   guard let parameters = protocols.first, let a = parameters["min_fee_a"] as? NSNumber, let b = parameters["min_fee_b"] as? NSNumber,
     let coins = parameters["coins_per_utxo_size"] as? String, let maxSize = parameters["max_tx_size"] as? NSNumber,
-    a.uint64Value > 0, maxSize.uint64Value <= 32768 else { throw TransferError.invalid("현재 거래 규칙을 확인하지 못했어요") }
-  let rows = try await query("/address_utxos",body:["_addresses":[owner],"_extended":true])
-  guard !rows.isEmpty, rows.count <= 50 else { throw TransferError.invalid("사용할 입금이 없거나 너무 많아요") }
+    // 메인넷 현재 값: a 44, b 155381, 최대 크기 16384 → 넉넉한 상한 안에서만 받음
+    a.int64Value > 0, a.int64Value <= 1_000, b.int64Value >= 0, b.int64Value <= 10_000_000,
+    maxSize.int64Value > 0, maxSize.int64Value <= 32768 else { throw TransferError.invalid("현재 거래 규칙을 확인하지 못했어요") }
+  let all = try await query("/address_utxos",body:["_addresses":[owner],"_extended":true])
+  guard !all.isEmpty else { throw TransferError.invalid("사용할 입금이 없어요") }
+  // 입금이 50개를 넘으면 쓸 것만 골라서 (NIGHT 를 보낼 땐 NIGHT 가 든 입금 먼저, 그다음 ADA 가 많은 순)
+  func holdsNight(_ row:[String:Any]) -> Bool {
+   ((row["asset_list"] as? [[String:Any]]) ?? []).contains { $0["policy_id"] as? String == ChainAPI.nightPolicy && $0["asset_name"] as? String == ChainAPI.nightName }
+  }
+  func lovelaceOf(_ row:[String:Any]) -> UInt64 { UInt64((row["value"] as? String) ?? "") ?? 0 }
+  let rows = all.count <= 50 ? all : Array(all.sorted { x, y in
+   let nx = asset == "night" && holdsNight(x), ny = asset == "night" && holdsNight(y)
+   return nx != ny ? nx : lovelaceOf(x) > lovelaceOf(y)
+  }.prefix(50))
   let hashes = Array(Set(rows.compactMap { $0["tx_hash"] as? String }))
   let transactions = try await query("/tx_cbor",body:["_tx_hashes":hashes])
   var evidenceByHash:[String:CardanoEvidence] = [:]
@@ -59,13 +72,17 @@ enum CardanoTransfer {
   guard let minimumString = Cardano.outputMinAdaAmount(toAddress:to,tokenBundle:try bundle.serializedData(),coinsPerUtxoByte:coins), let minimum = UInt64(minimumString) else { throw TransferError.invalid("최소 ADA 금액을 계산하지 못했어요") }
   let adaAmount = asset == "ada" ? quantity : minimum
   guard adaAmount >= minimum else { throw TransferError.invalid("받는 출력의 최소 ADA 금액보다 작아요") }
-  input.ttl = slot.uint64Value + 1800
+  input.ttl = slot.uint64Value + 1800   // slot 은 위에서 1조 미만으로 확인
   input.transferMessage = CardanoTransferMessage.with { $0.toAddress = to; $0.changeAddress = owner; $0.amount = adaAmount; $0.tokenAmount = bundle }
   // Bound the exact fee by the protocol's maximum transaction size. The signer uses the actual encoded size.
-  let cap = a.uint64Value * maxSize.uint64Value + b.uint64Value
+  let product = a.uint64Value.multipliedReportingOverflow(by: maxSize.uint64Value)
+  let capSum = product.partialValue.addingReportingOverflow(b.uint64Value)
+  guard !product.overflow, !capSum.overflow, capSum.partialValue < UInt64(Int64.max) else { throw TransferError.invalid("수수료 상한을 확인하지 못했어요") }
+  let cap = capSum.partialValue
   input.transferMessage.forceFee = cap
   let plan:CardanoTransactionPlan = AnySigner.plan(input:input,coin:.cardano)
-  guard plan.error == .ok, plan.amount == adaAmount, plan.availableAmount >= adaAmount + cap else { throw TransferError.invalid("보낼 잔액 또는 수수료용 ADA가 부족해요") }
+  let need = adaAmount.addingReportingOverflow(cap)
+  guard plan.error == .ok, plan.amount == adaAmount, !need.overflow, plan.availableAmount >= need.partialValue else { throw TransferError.invalid("보낼 잔액 또는 수수료용 ADA가 부족해요") }
   let draft: [String:Any] = ["validSlot":input.ttl,"input":try input.serializedData().base64EncodedString(),"coefficient":a.uint64Value,"constant":b.uint64Value,"coinsPerByte":coins,"maximumSize":maxSize.uint64Value,"accompanyingADA":String(adaAmount)]
   return TransferQuote(network:.cardano,asset:asset,owner:owner,recipient:to,raw:raw,fee:Decimal(cap)/1000000,expires:Date().addingTimeInterval(45),draft:draft,parameter:nil,maxFee:Int64(cap))
  }
@@ -105,7 +122,10 @@ extension WalletKeys {
    }
    let output:CardanoSigningOutput = AnySigner.sign(input:input,coin:.cardano)
    guard output.error == .ok, output.encoded.count <= maxSize else { throw TransferError.invalid("서명 검증에 실패했어요") }
-   let required = a * UInt64(output.encoded.count) + b
+   let scaled = a.multipliedReportingOverflow(by: UInt64(output.encoded.count))
+   let total = scaled.partialValue.addingReportingOverflow(b)
+   guard !scaled.overflow, !total.overflow, quote.maxFee > 0 else { throw TransferError.invalid("실제 수수료를 계산하지 못했어요") }
+   let required = total.partialValue
    guard required <= UInt64(quote.maxFee) else { throw TransferError.invalid("실제 수수료가 확인한 상한을 넘어요") }
    if required == fee {
     let evidence = try CardanoEvidence.parse(output.encoded)

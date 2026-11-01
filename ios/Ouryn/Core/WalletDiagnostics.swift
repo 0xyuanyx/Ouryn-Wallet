@@ -22,6 +22,19 @@ struct WalletDiagnosticsView: View {
    check(parsePay(addresses[.ethereum]!)?.network == nil,"EVM ambiguity retained")
    check(parsePay("solana:" + addresses[.ethereum]!) == nil,"Solana URI wrong-chain rejection")
    check(parsePay("ouryn:" + addresses[.solana]! + "?a=12&t=t")?.asset == "usdt","USDT amount request retained")
+   // ERC-681: 토큰 송금 요청은 받는 사람·토큰·수량을 그대로 읽고, 지원하지 않는 요청은 거부
+   let usdc = "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", payee = addresses[.ethereum]!
+   let erc20 = parsePay("ethereum:" + usdc + "@1/transfer?address=" + payee + "&uint256=1500000")
+   check(erc20?.to == payee && erc20?.asset == "usdc" && erc20?.qty == "1.5" && erc20?.network == WalletNetwork.ethereum.rawValue,"ERC-681 token transfer keeps recipient, token and amount")
+   check(parsePay("ethereum:pay-" + usdc + "@1/transfer?address=" + payee + "&uint256=1e6")?.qty == "1","ERC-681 scientific amount")
+   check(parsePay("ethereum:" + usdc + "@1/approve?address=" + payee + "&uint256=1") == nil,"ERC-681 approve rejected")
+   check(parsePay("ethereum:" + usdc + "/transfer?address=" + payee + "&uint256=1") == nil,"ERC-681 transfer without chain rejected")
+   check(parsePay("ethereum:" + payee + "@1/transfer?address=" + payee) == nil,"ERC-681 unknown token contract rejected")
+   check(parsePay("ethereum:" + payee + "@invalid") == nil,"ERC-681 invalid chain rejected")
+   check(parsePay("ethereum:" + payee + "@1?value=2.014e18")?.qty == "2.014","ERC-681 native value exact")
+   check(parsePay("ethereum:" + payee + "@1?value=1&value=2") == nil,"ERC-681 duplicate parameter rejected")
+   check(parsePay("ethereum:" + payee + "@1?data=0x00") == nil,"ERC-681 unknown parameter rejected")
+   check(parsePay("ethereum:" + payee + "@1?value=0.5") == nil,"ERC-681 fractional wei rejected")
    var legacy = AppState(); legacy.wallet.circle = 100
    do {
     let data = try JSONEncoder().encode(legacy)

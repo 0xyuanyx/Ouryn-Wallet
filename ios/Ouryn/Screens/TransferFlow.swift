@@ -47,7 +47,6 @@ struct TransferFlow: View {
  @State private var askWords = false   // 12단어로 보내기
  @State private var offerWords = false // Face ID 로 못 열었을 때 '12단어로 보내기' 버튼
  @State private var netKey = ""        // 0x 주소에서 사용자가 확인한 네트워크 ("주소|네트워크")
- @State private var selfOK = false     // 내 주소로 보내는 게 맞다고 확인했는지
 
  private var recent: [Tx] { recentSends(store.st, limit: 8) }
  private var detected: [WalletNetwork] { WalletNetwork.detect(to) }
@@ -77,6 +76,13 @@ struct TransferFlow: View {
    .first { among.contains($0) }
  }
  private var invalid: Bool { to.trimmingCharacters(in: .whitespacesAndNewlines).count >= 20 && detected.isEmpty && !needTest && !needReal }
+ /// 받는 주소가 지금 통장의 같은 네트워크 주소인지 (EVM·bech32 주소는 대소문자 무시)
+ /// 내 주소로 보내면 수수료만 나가서 막음 — 서버 견적 단계와 같은 정책을 입력 단계에서 먼저 알려줌
+ private var isSelf: Bool {
+  guard let mine = store.st.address(net: network.rawValue), !cleanTo.isEmpty else { return false }
+  let caseless = network.isEVM || network == .bitcoin || network == .cardano
+  return caseless ? mine.lowercased() == cleanTo.lowercased() : mine == cleanTo
+ }
  /// 테스트넷 주소는 테스트 통장에서만, 실제 네트워크 주소는 진짜 통장에서만
  private var needTest: Bool { !store.st.inTest && (testReq || Testnet.looksTest(to)) }
  private var needReal: Bool { store.st.inTest && (mainReq || Testnet.looksMain(to)) }
@@ -182,6 +188,8 @@ struct TransferFlow: View {
    TX("\(detected.map(\.rawValue).joined(separator: "·")) 주소예요. 위에서 네트워크를 골라주세요", .r, 13, C.amber, lh: 19).padding(.top, 8)
   } else if invalid {
    TX("지갑 주소 형식이 아니에요", .r, 13, C.red).padding(.top, 8)
+  } else if isSelf {
+   TX("지금 통장의 내 주소예요. 내 주소로는 보낼 수 없어요", .r, 13, C.red).padding(.top, 8)
   }
   if needTest || needReal { accountGate }
   if ambiguous && !needTest && !needReal { networkChips }
@@ -260,7 +268,7 @@ struct TransferFlow: View {
   .padding(.top, 8)
 
   OButton(busy ? "수수료 확인 중" : "수수료 확인",
-          disabled: busy || to.isEmpty || amount.isEmpty || (mismatch && !ambiguous) || !netConfirmed || invalid || needTest || needReal) { prepare() }
+          disabled: busy || to.isEmpty || amount.isEmpty || (mismatch && !ambiguous) || !netConfirmed || invalid || isSelf || needTest || needReal) { prepare() }
    .padding(.top, 18)
 
   let saved = Array((store.st.savedRecipients ?? []).suffix(2).reversed())
@@ -413,7 +421,6 @@ struct TransferFlow: View {
  @ViewBuilder private func quoteView(_ quote: TransferQuote) -> some View {
   let st = store.st
   let own = st.ownAccount(address: quote.recipient, net: quote.network.rawValue)
-  let toSelf = own?.active == true
   let who = st.nameOf(quote.recipient, net: quote.network.rawValue)
   let netName = Testnet.on ? Testnet.name(quote.network) : quote.network.rawValue
   let qty = ExactAmount.display(raw: quote.raw, decimals: quote.network.decimals(quote.asset))
@@ -446,22 +453,6 @@ struct TransferFlow: View {
    .frame(maxWidth: .infinity)
    .padding(.top, 20)
 
-   // 지금 통장 주소로 보낼 때: 막지 않고 알려주고 한 번 더 확인
-   if toSelf {
-    HStack(alignment: .top, spacing: 12) {
-     Icon("information-circle-outline", 19, Color(hex: "#D8D8DC"))
-     VStack(alignment: .leading, spacing: 4) {
-      TX("내 주소로 보내요 · 수수료만 나가요", .b, 15)
-      TX("받는 주소가 지금 보고 있는 통장의 \(quote.network.rawValue) 주소예요. 보내도 잔액은 그대로고 수수료만 줄어요.", .r, 13, C.sub, lh: 19)
-       .fixedSize(horizontal: false, vertical: true)
-     }
-    }
-    .padding(16)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .background(RoundedRectangle(cornerRadius: 16).fill(C.surface2))
-    .padding(.top, 20)
-   }
-
    VStack(alignment: .leading, spacing: 0) {
     HStack(spacing: 6) {
      TX("받는 곳", .r, 14, C.sub)
@@ -493,22 +484,22 @@ struct TransferFlow: View {
    .background(RoundedRectangle(cornerRadius: 16).fill(C.surface))
    .padding(.top, 12)
 
-   if toSelf {
-    Tap(action: { haptic(.select); selfOK.toggle() }) {
-     HStack(spacing: 12) {
-      Icon(selfOK ? "checkbox" : "square-outline", 22, selfOK ? C.text : C.mute)
-      TX("내 주소로 보내는 게 맞아요", .sb, 15)
-      Spacer(minLength: 0)
-     }
-     .padding(.horizontal, 16)
-     .frame(height: 52)
-     .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(C.surface3, lineWidth: 1))
+   // 수수료 상한이 지나치게 크면 한 번 더 알려줌 (공개 서버가 비정상 견적을 줄 수도 있어서)
+   let feeUSD = NSDecimalNumber(decimal: quote.fee).doubleValue * st.usdPrice(quote.network.native)
+   if feeUSD >= 30 || (quote.network.isEVM && won > 0 && feeUSD >= won * 0.5) {
+    HStack(alignment: .top, spacing: 10) {
+     Icon("warning", 17, C.amber)
+     TX("수수료 상한이 약 \(wonOf(feeUSD))로 평소보다 높아요\(won > 0 && feeUSD >= won * 0.5 ? " · 보내는 금액의 절반이 넘어요" : ""). 급하지 않다면 잠시 뒤 다시 확인해주세요.",
+        .r, 13, Color(hex: "#F2D6A6"), lh: 19)
+      .fixedSize(horizontal: false, vertical: true)
     }
-    .accessibilityAddTraits(selfOK ? .isSelected : [])
-    .padding(.top, 16)
+    .padding(12)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(RoundedRectangle(cornerRadius: 14).fill(C.amber.opacity(0.10)))
+    .padding(.top, 12)
    }
 
-   OButton(busy ? "확인 중" : "본인 확인하고 보내기", disabled: busy || (toSelf && !selfOK)) { authenticate(quote) }.padding(.top, 18)
+   OButton(busy ? "확인 중" : "본인 확인하고 보내기", disabled: busy) { authenticate(quote) }.padding(.top, 18)
    if offerWords { OButton("12단어로 보내기", kind: .secondary, disabled: busy) { askWords = true }.padding(.top, 8) }
    OButton("수정", kind: .secondary, disabled: busy) { self.quote = nil; offerWords = false }.padding(.top, 8)
   }
@@ -573,10 +564,12 @@ struct TransferFlow: View {
    if n.isEVM { netKey = req.to.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() + "|" + n.rawValue }
   }
   if let a = req.asset, network.assets.contains(a) { asset = a }
-  amount = req.usd.map { String(format: "%.6f", $0) } ?? ""
+  // 정확한 수량(ERC-681 최소 단위)이 있으면 그대로, 아니면 달러 요청 금액
+  amount = req.qty ?? req.usd.map { String(format: "%.6f", $0) } ?? ""
  }
  private func prepare() {
   guard let owner = store.st.address(net: network.rawValue) else { error = "지갑 주소 검증을 확인해주세요"; return }
+  guard !isSelf else { error = "지금 통장의 내 주소예요. 내 주소로는 보낼 수 없어요"; return }
   // 같은 네트워크에 확정 안 된 송금이 있으면 새로 보내지 않음 (나중에 둘 다 처리돼 두 번 나가는 일 방지)
   if let prior = store.st.tx.first(where: { $0.type == .send && $0.inFlight && $0.network == network.rawValue }) {
    error = prior.status == .delayed
@@ -593,7 +586,7 @@ struct TransferFlow: View {
     else if selectedNetwork == .bitcoin { result = try await BitcoinTransfer.quote(owner: owner, to: recipient, amount: input) }
     else if selectedNetwork == .cardano { result = try await CardanoTransfer.quote(owner: owner, to: recipient, asset: selected, amount: input) }
     else { result = try await EVMTransfer.quote(network: selectedNetwork, owner: owner, to: recipient, asset: selected, amount: input) }
-    network = result.network; asset = result.asset; selfOK = false; quote = result; to = recipient }
+    network = result.network; asset = result.asset; quote = result; to = recipient }
    catch { self.error = error.localizedDescription }
    busy = false
   }
@@ -606,11 +599,11 @@ struct TransferFlow: View {
   guard !busy else { return }
   error = ""
   let wallet = WalletKeys.active.wallet
-  switch WalletKeys.sendGate(wallet: wallet) {
+  switch WalletKeys.sendGate(wallet: wallet, pinAlways: store.st.pinOnSend) {
   case .faceID:
    unlockAndSend(quoted)
   case .pin:
-   pinSub = WalletKeys.isBiometric(wallet) ? "Face ID 등록이 바뀌어서 비밀번호로 한 번 더 확인할게요" : "보내기 전에 비밀번호로 확인할게요"
+   pinSub = WalletKeys.isBiometric(wallet) && Biometry.changed() ? "Face ID 등록이 바뀌어서 비밀번호로 한 번 더 확인할게요" : "보내기 전에 비밀번호로 확인할게요"
    askPin = true
   case .words:
    offerWords = true

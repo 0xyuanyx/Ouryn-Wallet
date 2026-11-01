@@ -26,6 +26,7 @@ struct PayRequest: Equatable, Hashable {
     var asset: String? = nil
     var test = false      // 테스트넷 주소 (테스트 통장에서만 보냄)
     var mainnet = false   // 실제 네트워크라고 밝힌 주소 (테스트 통장에서는 못 보냄)
+    var qty: String? = nil // 정확한 코인 수량 (ERC-681 처럼 최소 단위로 받은 요청). 있으면 usd 대신 이 값을 그대로 씀
 }
 
 /// 소수점 둘째 자리까지, 과학 표기 없이 (예: 12, 0.5, 30.25)
@@ -92,17 +93,71 @@ func parsePay(_ raw: String) -> PayRequest? {
     return req
 }
 
-/// "ethereum:<주소>@<체인 번호>" (EIP-681) — 체인 번호로 네트워크·테스트넷을 알아봄. 금액 등 나머지는 읽지 않음
+/// "ethereum:[pay-]<주소>[@<체인 번호>][/<함수>][?<값들>]" (ERC-681 · https://eips.ethereum.org/EIPS/eip-681)
+/// - 주소만: 그 주소로 보내기. value=<wei> 가 있으면 그 체인 기본 코인 수량
+/// - /transfer: <주소> 는 토큰 컨트랙트, address= 가 받는 사람, uint256= 가 최소 단위 수량
+///   → 앱이 아는 토큰(USDC·USDT·USDT0)일 때만. 받는 사람을 컨트랙트 주소로 바꿔 읽지 않음
+/// - 그 밖의 함수(approve 등), 모르는 값·같은 값 두 번·잘못된 체인 번호는 뜻을 버리고 받지 않고 거부
+/// - 수량이나 함수가 있으면 체인 번호가 꼭 있어야 함 (어느 네트워크 수량인지 모르면 거부)
 private func parseEIP681(_ body: String) -> PayRequest? {
     var b = body
     if b.hasPrefix("pay-") { b = String(b.dropFirst(4)) }
-    let head = b.split(separator: "?", maxSplits: 1).first.map(String.init) ?? b
-    let target = head.split(separator: "/", maxSplits: 1).first.map(String.init) ?? head
-    let at = target.split(separator: "@", maxSplits: 1).map(String.init)
-    guard let to = at.first else { return nil }
-    let chain = at.count > 1 ? Int(at[1]) : nil
-    guard let pick = Testnet.evm(chain: chain ?? 1), WalletKeys.valid(to, network: pick.0, test: pick.1) else { return nil }
-    return PayRequest(to: to, network: chain == nil ? nil : pick.0.rawValue, test: pick.1, mainnet: chain != nil && !pick.1)
+    let split = b.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+    let head = split[0]
+    let query = split.count > 1 ? split[1] : nil
+    let path = head.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+    let function = path.count > 1 ? path[1] : nil
+    let at = path[0].split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+    let target = at[0]
+    guard !target.isEmpty else { return nil }
+    // 체인 번호를 적었으면 숫자이면서 앱이 아는 체인이어야 함 (@invalid 를 '체인 없음'으로 넘기지 않음)
+    var chain: Int? = nil
+    if at.count > 1 {
+        guard !at[1].isEmpty, at[1].allSatisfy({ $0 >= "0" && $0 <= "9" }), let c = Int(at[1]), Testnet.evm(chain: c) != nil else { return nil }
+        chain = c
+    }
+    // 값들: key=value, 같은 key 두 번은 거부
+    var params: [String: String] = [:]
+    if let query {
+        guard !query.isEmpty else { return nil }
+        for kv in query.split(separator: "&", omittingEmptySubsequences: false) {
+            let p = kv.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+            guard p.count == 2, !p[0].isEmpty, params[p[0]] == nil, let v = p[1].removingPercentEncoding, !v.isEmpty else { return nil }
+            params[p[0]] = v
+        }
+    }
+    // 수수료 힌트는 앱이 직접 계산하므로 읽지 않아도 보낼 대상·수량이 바뀌지 않음
+    let feeHints: Set<String> = ["gas", "gasLimit", "gasPrice"]
+
+    switch function {
+    case nil:
+        guard Set(params.keys).subtracting(feeHints).isSubset(of: ["value"]) else { return nil }
+        guard let value = params["value"] else {
+            // 주소만 (+ 수수료 힌트): 체인이 없으면 0x 네트워크 셋 중에서 직접 고름
+            guard let pick = Testnet.evm(chain: chain ?? 1), WalletKeys.valid(target, network: pick.0, test: pick.1) else { return nil }
+            return PayRequest(to: target, network: chain == nil ? nil : pick.0.rawValue, test: pick.1, mainnet: chain != nil && !pick.1)
+        }
+        guard let c = chain, let pick = Testnet.evm(chain: c), WalletKeys.valid(target, network: pick.0, test: pick.1),
+              let raw = ExactAmount.erc681(value), raw != "0",
+              let qty = ExactAmount.text(raw: raw, decimals: pick.0.decimals(pick.0.native)) else { return nil }
+        return PayRequest(to: target, network: pick.0.rawValue, asset: pick.0.native, test: pick.1, mainnet: !pick.1, qty: qty)
+    case "transfer"?:
+        guard Set(params.keys).subtracting(feeHints).isSubset(of: ["address", "uint256"]),
+              let c = chain, let pick = Testnet.evm(chain: c),
+              let recipient = params["address"], WalletKeys.valid(recipient, network: pick.0, test: pick.1),
+              recipient.lowercased() != target.lowercased(),
+              let asset = pick.0.assets.first(where: { pick.0.contract($0, test: pick.1)?.lowercased() == target.lowercased() })
+        else { return nil }
+        var req = PayRequest(to: recipient, network: pick.0.rawValue, asset: asset, test: pick.1, mainnet: !pick.1)
+        if let amount = params["uint256"] {
+            guard let raw = ExactAmount.erc681(amount), raw != "0",
+                  let qty = ExactAmount.text(raw: raw, decimals: pick.0.decimals(asset)) else { return nil }
+            req.qty = qty
+        }
+        return req
+    default:
+        return nil   // approve 등 송금이 아닌 함수는 지원하지 않음
+    }
 }
 
 /// "ouryn:<주소>?a=12.5&t=c" 읽기 (c = 서클 달러, t = 테더 달러)

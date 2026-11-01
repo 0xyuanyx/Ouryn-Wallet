@@ -2,6 +2,8 @@ import Foundation
 import WalletCore
 
 enum EVMTransfer {
+ /// 공개 RPC 가 알려준 gas 가격의 상한 (1000 gwei). 넘으면 비정상 견적으로 보고 서명하지 않음
+ static let maxGasPrice = Decimal(1_000_000_000_000)
  static func quote(network:WalletNetwork,owner:String,to:String,asset:String,amount:String) async throws -> TransferQuote {
   guard [.ethereum,.mantle,.avalanche].contains(network), network.assets.contains(asset), WalletKeys.valid(to,network:network), owner.lowercased() != to.lowercased() else { throw TransferError.invalid("자산과 받는 주소를 확인해주세요") }
   let raw = try ExactAmount.parse(amount,decimals:network.decimals(asset))
@@ -20,6 +22,7 @@ enum EVMTransfer {
   guard let gas = ExactAmount.hexDecimal(estimated), gas >= 21000, gas <= (network == .mantle ? 100000000 : 1000000),
         let price = ExactAmount.hexDecimal(gasPrice), price > 0,
         let nonceValue = ExactAmount.hexDecimal(nonce), nonceValue >= 0 else { throw TransferError.invalid("수수료 견적을 확인하지 못했어요") }
+  guard price <= maxGasPrice else { throw TransferError.invalid("네트워크 수수료가 비정상적으로 높아요. 잠시 뒤 다시 시도해주세요") }
   let limit = NSDecimalNumber(decimal:gas * Decimal(string:"1.2")!).uint64Value
   let feeRaw = Decimal(limit) * price
   let native = Decimal(string:balances[network.native] ?? "0") ?? 0
@@ -32,12 +35,18 @@ enum EVMTransfer {
   let hash = try await MultiChainAPI.rpc(network,"eth_sendRawTransaction",[encoded])
   guard hash.lowercased() == signed.id.lowercased() else { throw TransferError.invalid("전송 응답 해시가 달라요. 기존 거래를 확인 중이에요") }
  }
+ /// 영수증이 생겨도 바로 '완료'로 보지 않고, 그 위에 블록이 충분히 쌓였을 때 완료 (network.confirmations)
+ /// 그 전까지는 확인 중으로 두고 다음 동기화 때 다시 봄 → 짧은 재조직으로 사라진 거래를 완료로 남기지 않음
  static func status(_ hash:String,network:WalletNetwork) async throws -> TxStatus {
   guard let rpc = network.rpc else { throw TransferError.invalid("네트워크 오류") }
   let response = try await MultiChainAPI.request(rpc,body:["jsonrpc":"2.0","id":1,"method":"eth_getTransactionReceipt","params":[hash]])
   guard response["error"] == nil else { throw MultiChainAPI.APIError.invalid }
   guard let receipt = response["result"] as? [String:Any], let status = receipt["status"] as? String else { return .pending }
-  return status == "0x1" ? .done : .failed
+  guard status == "0x1" else { return .failed }
+  guard network.confirmations > 1 else { return .done }
+  guard let included = (receipt["blockNumber"] as? String).flatMap({ ExactAmount.hexDecimal($0) }),
+        let head = ExactAmount.hexDecimal(try await MultiChainAPI.rpc(network,"eth_blockNumber",[])), head >= included else { return .pending }
+  return head - included + 1 >= Decimal(network.confirmations) ? .done : .pending
  }
 }
 extension WalletKeys {

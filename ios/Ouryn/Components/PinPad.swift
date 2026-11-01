@@ -38,6 +38,8 @@ struct Keypad: View {
                         }
                         .buttonStyle(KeyStyle(enabled: k != nil))
                         .disabled(k == nil)
+                        .accessibilityLabel(k == "del" ? "지우기" : (k ?? ""))
+                        .accessibilityHidden(k == nil)
                     }
                 }
             }
@@ -83,6 +85,8 @@ struct PinPad<Header: View, Footer: View>: View {
                 }
                 .padding(.top, 28)
                 .offset(x: shake)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(length)자리 중 \(pin.count)자리 입력함")
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.horizontal, 24)
@@ -124,6 +128,8 @@ struct PinPad<Header: View, Footer: View>: View {
                     err = m
                     doShake()
                 }
+                // VoiceOver 사용자도 틀린 이유를 바로 듣게
+                if case .ok = res {} else if let e = err { UIAccessibility.post(notification: .announcement, argument: e) }
                 pin = ""
             }
         }

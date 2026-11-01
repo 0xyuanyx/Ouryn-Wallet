@@ -426,14 +426,18 @@ struct ImportWalletView: View {
         return VStack(alignment: .leading, spacing: 0) {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
-                    TX("쓰던 12단어를\n입력해주세요", .b, 26, lh: 36).padding(.top, 10)
-                    TX("앱은 고르지 않아도 돼요. 어느 앱에서 쓰던 지갑인지 알아서 찾아요. 입력한 단어는 이 폰 밖으로 나가지 않아요.",
+                    TX("쓰던 12단어(또는 24단어)를\n입력해주세요", .b, 26, lh: 36).padding(.top, 10)
+                    TX("Phantom·MetaMask 방식과 Trust Wallet·Ledger 방식의 경로를 차례로 확인해요. 입력한 단어는 이 폰 밖으로 나가지 않아요.",
                        .r, 15, C.sub, lh: 22)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 10)
+                    TX("비밀 문구(passphrase · 25번째 단어)를 함께 쓰던 지갑은 아직 가져올 수 없어요. 하드웨어 지갑(Ledger 등)의 단어를 폰에 입력하면 하드웨어 지갑의 보호를 잃으니, 그 돈은 하드웨어 지갑으로 관리하세요.",
+                       .r, 13, C.mute, lh: 19)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 8)
                     Field(text: $words, placeholder: "apple banana …", mono: true).padding(.top, 24)
                     HStack {
-                        TX("\(l.count)/12", .m, 13, countOk ? C.green : C.mute)
+                        TX("\(l.count)/\(l.count > 12 ? 24 : 12)", .m, 13, countOk ? C.green : C.mute)
                         Spacer()
                         Tap(action: {
                             if let t = UIPasteboard.general.string {
@@ -526,13 +530,30 @@ struct ImportWalletView: View {
                     } else {
                         HStack(spacing: 8) {
                             Icon("checkmark", 16, C.green)
-                            TX("Phantom·MetaMask·Trust 방식을 모두 확인했어요", .r, 13, Color(hex: "#D8D8DC"))
+                            TX("두 방식의 0~\(max(0, (scan?.next ?? WalletDiscovery.batch) - 1))번 통장을 확인했어요", .r, 13, Color(hex: "#D8D8DC"))
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 10)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(RoundedRectangle(cornerRadius: 12).fill(C.green.opacity(0.10)))
                         .padding(.top, 16)
+                    }
+                    if let other = scan?.otherScheme, let n = scan?.otherUsed, n > 0 {
+                        // 고르지 않은 방식에서만 보이는 돈 — 조용히 버리지 않고 알려줌
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 8) {
+                                Icon("alert-circle", 16, C.amber)
+                                TX("다른 방식에서도 쓰던 통장 \(n)개를 찾았어요", .sb, 13, C.amber)
+                            }
+                            TX("\(other == .alt ? "Trust Wallet·Ledger" : "Phantom·MetaMask") 방식의 통장이에요. 한 지갑은 한 방식만 가져올 수 있어서 이번에는 가져오지 않아요. 그 통장의 돈은 원래 쓰던 앱에서 확인하거나 옮겨주세요.",
+                               .r, 13, Color(hex: "#D8D8DC"), lh: 19)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(C.amber.opacity(0.10)))
+                        .padding(.top, 10)
                     }
 
                     VStack(spacing: 0) {
@@ -544,7 +565,7 @@ struct ImportWalletView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 20))
                     .padding(.top, 14)
 
-                    TX("잔액이나 거래 기록이 있는 통장만 가져와요. 비어 있는 통장은 나중에 '통장 추가'로 열 수 있어요.",
+                    TX("잔액이나 거래 기록이 있는 통장만 가져와요. 비어 있는 통장은 나중에 '통장 추가'로 열 수 있어요. 비트코인은 통장마다 첫 받기 주소(m/84'/0'/n'/0/0) 하나, 카르다노도 첫 주소 하나만 확인해요. 다른 주소에 있는 돈은 원래 앱에서 확인해주세요.",
                        .r, 12, Color(hex: "#6B6B76"), lh: 18)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 10)

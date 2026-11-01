@@ -12,8 +12,9 @@ enum WalletNetwork: String, Codable, CaseIterable, Identifiable {
  var rpc: String? {
   if Testnet.on { switch self { case .ethereum: return "https://ethereum-sepolia-rpc.publicnode.com"; case .mantle: return "https://rpc.sepolia.mantle.xyz"; case .avalanche: return "https://api.avax-test.network/ext/bc/C/rpc"; default: return nil } }
   switch self { case .ethereum: return "https://ethereum-rpc.publicnode.com"; case .mantle: return "https://rpc.mantle.xyz"; case .avalanche: return "https://api.avax.network/ext/bc/C/rpc"; default: return nil } }
- func contract(_ asset: String) -> String? {
-  if Testnet.on {
+ /// test: 테스트넷 토큰 주소로 볼지 (기본은 지금 통장 기준). QR 처럼 체인 번호를 밝힌 요청은 그 체인 기준으로 찾음
+ func contract(_ asset: String, test: Bool = Testnet.on) -> String? {
+  if test {
    switch (self,asset) {
    case (.tron,"usdt"): return "TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf" // Nile
    case (.ethereum,"usdc"): return "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" // Sepolia (Circle)
@@ -31,6 +32,10 @@ enum WalletNetwork: String, Codable, CaseIterable, Identifiable {
   default: return nil
   }
  }
+ /// 보낸 거래를 '완료'로 볼 확정 깊이 (거래가 들어간 블록 포함 몇 블록)
+ /// 이더리움은 재조직 위험을 줄이려고 12블록, 맨틀 3블록, Avalanche 는 즉시 확정이라 1블록, 비트코인 3블록
+ /// 트론(solidified)·솔라나(finalized)·카르다노(3확정)는 각자 상태 조회에서 따로 확인
+ var confirmations: Int { switch self { case .ethereum: return 12; case .mantle: return 3; case .bitcoin: return 3; default: return 1 } }
  func decimals(_ asset: String) -> Int { if asset == "usdc" || asset == "usdt" || asset == "usdt0" || asset == "trx" || asset == "ada" || asset == "night" { return 6 }; if asset == "btc" { return 8 }; if asset == "sol" { return 9 }; return 18 }
 }
 enum AmountError: Error { case invalid }
@@ -59,6 +64,46 @@ enum ExactAmount {
    out.append(UInt8(carry)); digits = quotient
   }
   return Data(out.isEmpty ? [0] : out.reversed())
+ }
+ /// 정수 최소 단위 → 사람이 읽는 수량 문자열 (반올림 없음). "1500000", 6 → "1.5"
+ static func text(raw: String, decimals: Int) -> String? {
+  guard !raw.isEmpty, raw.allSatisfy({ $0 >= "0" && $0 <= "9" }), raw.count <= 38, (0...18).contains(decimals) else { return nil }
+  let digits = String(raw.drop(while: { $0 == "0" }))
+  guard !digits.isEmpty else { return "0" }
+  let padded = String(repeating: "0", count: max(0, decimals + 1 - digits.count)) + digits
+  let whole = String(padded.dropLast(decimals))
+  var fraction = String(padded.suffix(decimals))
+  while fraction.hasSuffix("0") { fraction.removeLast() }
+  return fraction.isEmpty ? whole : whole + "." + fraction
+ }
+ /// ERC-681 숫자 ("1000000", "2.014e18", "1E6") → 정수 최소 단위. 음수·소수로 끝나는 값·38자리를 넘는 값은 nil
+ static func erc681(_ text: String) -> String? {
+  let lower = text.lowercased()
+  let parts = lower.split(separator: "e", maxSplits: 1, omittingEmptySubsequences: false)
+  let mantissa = String(parts[0])
+  var exponent = 0
+  if parts.count == 2 {
+   let e = String(parts[1])
+   guard !e.isEmpty, e.count <= 3, e.allSatisfy({ $0 >= "0" && $0 <= "9" }), let v = Int(e) else { return nil }
+   exponent = v
+  }
+  let pieces = mantissa.split(separator: ".", omittingEmptySubsequences: false)
+  guard pieces.count <= 2, pieces.allSatisfy({ $0.allSatisfy { $0 >= "0" && $0 <= "9" } }) else { return nil }
+  let whole = String(pieces[0]), fraction = pieces.count == 2 ? String(pieces[1]) : ""
+  guard !(whole.isEmpty && fraction.isEmpty), pieces.count == 1 || !fraction.isEmpty else { return nil }
+  var digits = whole + fraction
+  let shift = exponent - fraction.count
+  if shift >= 0 {
+   digits += String(repeating: "0", count: shift)
+  } else {
+   // 소수점 아래가 남으면 최소 단위로 나눌 수 없는 값
+   let cut = -shift
+   guard digits.count >= cut, digits.suffix(cut).allSatisfy({ $0 == "0" }) else { return nil }
+   digits = String(digits.dropLast(cut))
+  }
+  let stripped = String(digits.drop(while: { $0 == "0" }))
+  guard stripped.count <= 38 else { return nil }
+  return stripped.isEmpty ? "0" : stripped
  }
  static func hexDecimal(_ hex: String) -> Decimal? {
   var value = Decimal(0)

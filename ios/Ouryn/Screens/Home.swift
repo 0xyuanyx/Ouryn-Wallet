@@ -245,13 +245,17 @@ private struct SyncLine: View {
 
     var body: some View {
         let st = store.st
+        // 예전 4개 체인(syncFailed)과 추가 네트워크(트론·맨틀·Avalanche 등, networkErrors) 실패를 모두 합쳐서 봄
+        // 하나라도 못 읽었으면 '방금 확인' 대신 이전 값이 섞인 합계라고 알려줌
+        let failed = Array(Set(st.syncFailed).union((st.networkErrors ?? [:]).keys)).sorted()
         HStack(spacing: 6) {
             if store.syncing {
                 ProgressView().scaleEffect(0.6).frame(width: 12, height: 12).tint(C.mute)
                 TX("잔액 확인 중", .r, 12, C.mute)
-            } else if !st.syncFailed.isEmpty {
+            } else if !failed.isEmpty {
                 Icon("cloud-offline-outline", 13, C.amber)
-                TX("잔액을 못 읽었어요 · 당겨서 다시", .r, 12, C.amber, lines: 1)
+                TX(failed.count == 1 ? "\(failed[0]) 잔액을 못 읽어 이전 값으로 합쳤어요" : "\(failed.count)개 네트워크 잔액을 못 읽어 이전 값으로 합쳤어요",
+                   .r, 12, C.amber, lines: 1)
             } else if let t = st.lastSync {
                 Icon("checkmark-circle-outline", 13, C.mute)
                 TX(Date().timeIntervalSince(t) < 60 ? "방금 확인한 잔액이에요" : "\(relTime(t)) 확인한 잔액이에요", .r, 12, C.mute)

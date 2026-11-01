@@ -195,8 +195,11 @@ private struct Benefit: View {
 struct MoreView: View {
     @EnvironmentObject var store: Store
     @EnvironmentObject var router: Router
+    @Environment(\.openURL) private var openURL
     @State private var resetOpen = false
     @State private var gateOpen = false
+    /// 보안을 약하게 하는 설정(앱 잠금 끄기 · 보낼 때 비밀번호 끄기)은 비밀번호를 한 번 더 확인한 뒤에만 바꿈
+    @State private var weakenSetting: WritableKeyPath<AppState, Bool>? = nil
     @State private var deleteTarget: String? = nil   // "main" = 이 폰의 지갑 전체, 그 밖 = 그 지갑 id
     @State private var payOn = false
     @State private var payHelp = false
@@ -208,6 +211,13 @@ struct MoreView: View {
 
     private func bind(_ get: @escaping (AppState) -> Bool, _ set: @escaping (inout AppState, Bool) -> Void) -> Binding<Bool> {
         Binding(get: { get(store.st) }, set: { v in store.update { set(&$0, v) } })
+    }
+
+    /// 켜기는 바로, 끄기는 간편 비밀번호를 확인한 뒤에만 (앱이 열린 폰을 잠깐 빌린 사람이 보호를 끄지 못하게)
+    private func guarded(_ key: WritableKeyPath<AppState, Bool>) -> Binding<Bool> {
+        Binding(get: { store.st[keyPath: key] }, set: { v in
+            if v { store.update { $0[keyPath: key] = true } } else { weakenSetting = key }
+        })
     }
 
     var body: some View {
@@ -317,7 +327,7 @@ struct MoreView: View {
                 Label1("보안")
                 Group1 {
                     Item(icon: "keypad", label: "간편 비밀번호 바꾸기") { router.push(.changePin) }
-                    Toggle1(icon: "lock-closed", label: "앱 열 때 잠그기", isOn: bind({ $0.lockEnabled }, { $0.lockEnabled = $1 }))
+                    Toggle1(icon: "lock-closed", label: "앱 열 때 잠그기", isOn: guarded(\.lockEnabled))
                     if bio.ok {
                         Toggle1(icon: bio.icon, label: "\(bio.label)으로 열기", isOn: Binding(get: { store.st.bio }, set: { v in
                             if v {
@@ -328,7 +338,14 @@ struct MoreView: View {
                             }
                         }), noHaptic: true)
                     }
-                    Toggle1(icon: "shield-checkmark", label: "보낼 때 비밀번호 확인", isOn: bind({ $0.pinOnSend }, { $0.pinOnSend = $1 }), last: true)
+                    Toggle1(icon: "shield-checkmark", label: "보낼 때 비밀번호도 확인", isOn: guarded(\.pinOnSend), last: true)
+                    TX(st.pinOnSend ? "보낼 때마다 간편 비밀번호를 입력한 뒤 \(bio.ok ? bio.label : "본인 확인")으로 서명해요."
+                                    : "\(bio.ok ? bio.label : "본인 확인")만으로 서명해요. 얼굴 등록이 바뀌었거나 생체인증이 없으면 비밀번호도 물어요.",
+                       .r, 13, C.mute, lh: 18)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 Label1("화면")
@@ -357,15 +374,25 @@ struct MoreView: View {
 
                 Label1("알림 설정")
                 Group1 {
-                    Toggle1(icon: "arrow-down-circle", label: "돈이 들어오면 알림", isOn: bind({ $0.notify["receive"] ?? false }, { $0.notify["receive"] = $1 }))
-                    Toggle1(icon: "leaf", label: "매일 이자 알림", isOn: bind({ $0.notify["interest"] ?? false }, { $0.notify["interest"] = $1 }))
-                    Toggle1(icon: "trending-up", label: "코인이 하루 3% 넘게 움직이면 알림", isOn: bind({ $0.notify["price"] ?? true }, { $0.notify["price"] = $1 }), last: true)
+                    // 서버·푸시가 없어서 앱이 열려 있는 동안 잔액을 확인할 때만 앱 안 알림함에 남김 (기본값은 Store 와 같게 켜짐)
+                    Toggle1(icon: "arrow-down-circle", label: "돈이 들어오면 앱 안 알림", isOn: bind({ $0.notify["receive"] ?? true }, { $0.notify["receive"] = $1 }), last: true)
+                    TX("앱을 열어 둔 동안 잔액이 늘어난 걸 확인하면 알림함에 남겨요. 앱을 닫아 두면 알려드리지 못해요.",
+                       .r, 13, C.mute, lh: 18)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .overlay(alignment: .bottom) { Rectangle().fill(C.line).frame(height: 1) }
+                    Item(icon: "trending-up", label: "이자 · 가격 변동 알림", value: "준비 중", valueColor: C.mute, last: true, onPress: nil)
                 }
 
                 Label1("기타")
                 Group1 {
-                    Item(icon: "chatbubbles", label: "고객센터") { toast("상담 연결은 실제 앱에서 제공돼요", "chatbubbles-outline") }
-                    Item(icon: "document-text", label: "약관 및 정책") { toast("약관은 출시 전에 준비돼요", "document-text-outline") }
+                    Item(icon: "chatbubbles", label: "고객센터", value: "준비 중", valueColor: C.mute, onPress: nil)
+                    Item(icon: "document-text", label: "약관 및 정책", value: "준비 중", valueColor: C.mute, onPress: nil)
+                    Item(icon: "bug", label: "보안 문제 제보", sub: "공개 이슈 말고 비공개로 알려주세요") {
+                        if let url = URL(string: "https://github.com/0xyuanyx/Ouryn-Wallet/security/policy") { openURL(url) }
+                    }
                     Item(icon: "globe", label: "연결된 네트워크", value: st.inTest ? "테스트넷 (테스트 통장)" : "메인넷", onPress: nil)
                     Item(icon: "shield-checkmark", label: "주소 계산 자체 검사",
                          value: WalletKeys.allPassed ? "통과" : "일부 실패",
@@ -412,9 +439,17 @@ struct MoreView: View {
                 deleteChoices(walletId: st.currentWallet?.id ?? "main", backedUp: st.backedUp, phrase: .recovery, target: "main")
             }
         }
+        .fullScreenCover(isPresented: Binding(get: { weakenSetting != nil }, set: { if !$0 { weakenSetting = nil } })) {
+            PinGate(title: "간편 비밀번호를 입력해주세요", sub: "보안 설정을 끄려면 본인 확인이 필요해요", strict: true) { ok in
+                let key = weakenSetting
+                weakenSetting = nil
+                if ok, let key { store.update { $0[keyPath: key] = false } }
+            }
+            .environmentObject(store)
+        }
         // 지우기 전 간편 비밀번호 (앱이 열린 폰을 잠깐 빌린 사람도 지울 수 없게)
         .fullScreenCover(isPresented: $gateOpen) {
-            PinGate(title: "간편 비밀번호를 입력해주세요", sub: "지갑을 지우려면 본인 확인이 필요해요") { ok in
+            PinGate(title: "간편 비밀번호를 입력해주세요", sub: "지갑을 지우려면 본인 확인이 필요해요", strict: true) { ok in
                 gateOpen = false
                 let target = deleteTarget
                 deleteTarget = nil

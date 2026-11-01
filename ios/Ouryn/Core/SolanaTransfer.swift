@@ -24,7 +24,8 @@ enum SolanaTransferEngine {
    let info = try await rpc("getAccountInfo",[destination,["encoding":"jsonParsed"]]) as? [String:Any]
    let create = info?["value"] is NSNull
    if create {
-    guard let rent = try await rpc("getMinimumBalanceForRentExemption",[165]) as? NSNumber else { throw TransferError.invalid("토큰 계정 생성 비용을 확인하지 못했어요") }; cap += rent.uint64Value
+    // 현재 토큰 계정(165바이트) 보증금은 약 0.002 SOL. 넉넉한 상한(0.1 SOL) 안에서만 받음
+    guard let rent = try await rpc("getMinimumBalanceForRentExemption",[165]) as? NSNumber, rent.int64Value > 0, rent.int64Value <= 100_000_000 else { throw TransferError.invalid("토큰 계정 생성 비용을 확인하지 못했어요") }; cap += rent.uint64Value
    } else {
     guard let account = info?["value"] as? [String:Any], account["owner"] as? String == "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", let data = account["data"] as? [String:Any], let parsed = data["parsed"] as? [String:Any], let details = parsed["info"] as? [String:Any], details["mint"] as? String == mint, details["owner"] as? String == to else { throw TransferError.invalid("받는 토큰 계정이 올바르지 않아요") }
    }

@@ -67,8 +67,17 @@ enum WalletKeys {
     }
 
     /// 방금 만든 지갑의 12단어 — 온보딩에서 적고 확인하는 동안만 메모리에 둠 (Face ID 를 또 띄우지 않으려고)
+    /// 앱을 벗어나면 온보딩이 비우고, 돌아와서 비밀번호를 확인한 뒤 reloadFresh 로 다시 꺼냄
     private(set) static var freshWords: [String] = []
     static func clearFresh() { freshWords = [] }
+
+    /// Keychain 에서 방금 만든 지갑의 12단어를 다시 꺼냄 (생체인증 항목이면 Face ID). 성공하면 true
+    @MainActor
+    static func reloadFresh(reason: String) async -> Bool {
+        guard case .words(let m) = await unlock(wallet: "main", reason: reason) else { return false }
+        freshWords = m.split(separator: " ").map(String.init)
+        return true
+    }
 
     /// 복구 문구로 되찾기 (검증 후 저장)
     static func restore(_ words: String) -> ChainAddrs? {
@@ -100,7 +109,8 @@ enum WalletKeys {
     static func savedKeyStatus() -> SavedKeyStatus {
         switch attributes("main") {
         case .found: return .available
-        case .missing: return .missing
+        // 원래 항목은 없는데 다시 저장하던 사본이 남아 있으면 '지갑 없음'으로 보지 않음 (초기화하지 않고 다시 시도)
+        case .missing: return stagedCopyExists("main") ? .unavailable : .missing
         // 생체인증 항목이 정보 조회도 막는 경우: 같은 보호 수준의 비밀번호 항목이 읽히면 폰은 잠금 해제 상태 → 항목은 있음
         case .protected: return PinVault.exists ? .available : .unavailable
         case .error: return .unavailable
@@ -368,14 +378,14 @@ enum WalletKeys {
     }
 
     /// 보내기 전 본인 확인 단계
-    /// - 얼굴 등록 그대로: Face ID 만
+    /// - 얼굴 등록 그대로: Face ID 만 (설정 '보낼 때 비밀번호도 확인'이 켜져 있으면 비밀번호 먼저)
     /// - 얼굴 등록이 바뀜 또는 생체인증 없는 항목: 앱 비밀번호 먼저 (그다음 Face ID)
     /// - 그 상태에서 비밀번호를 10번 넘게 틀림: 12단어만
-    static func sendGate(wallet: String) -> SendGate {
+    static func sendGate(wallet: String, pinAlways: Bool = false) -> SendGate {
         let bio = isBiometric(wallet)
         let changed = bio && Biometry.changed()
         if PinVault.hardLocked && (changed || !bio) { return .words }
-        if changed || !bio { return .pin }
+        if changed || !bio || pinAlways { return .pin }
         return .faceID
     }
 
@@ -390,6 +400,15 @@ enum WalletKeys {
         }
     }
 
+    /// 다시 저장하던 임시 사본이 남아 있는지 (12단어는 읽지 않음)
+    private static func stagedCopyExists(_ wallet: String) -> Bool {
+        var q = query(wallet: wallet, staging: true)
+        q[kSecReturnAttributes as String] = true
+        q[kSecMatchLimit as String] = kSecMatchLimitOne
+        q[kSecUseAuthenticationContext as String] = silent()
+        return SecItemCopyMatching(q as CFDictionary, nil) != errSecItemNotFound
+    }
+
     /// 저장 도중 앱이 꺼졌을 때: 원래 항목이 없고 임시 사본만 있으면 사본으로 되살림
     static func recoverStaged(wallets: [String]) {
         for id in Set(wallets + ["main"]) {
@@ -400,7 +419,8 @@ enum WalletKeys {
             guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess,
                   let d = out as? Data, let m = String(data: d, encoding: .utf8) else { continue }
             switch attributes(id) {
-            case .missing: _ = put(m, wallet: id)
+            // 사본 자체가 보호 없는 항목이라, 생체인증 저장이 계속 실패하면 같은 수준으로라도 되살림 (다음 실행 때 다시 옮김)
+            case .missing: _ = put(m, wallet: id, allowPlain: true)
             case .found, .protected: _ = SecItemDelete(query(wallet: id, staging: true) as CFDictionary)
             case .error: break   // 확실하지 않으면 사본을 남겨둠
             }
@@ -481,24 +501,39 @@ enum WalletKeys {
     }
 
     /// 같은 이름의 항목을 새로 저장. 접근 조건은 덮어쓸 수 없어서 지우고 다시 넣음
-    /// 지우기 전에 보호 없는 임시 사본을 먼저 두고, 새 항목이 들어간 걸 확인한 뒤 사본을 지움
-    /// → 중간에 앱이 꺼져도 다음 실행 때 recoverStaged 가 되살림
-    private static func put(_ mnemonic: String, wallet: String) -> Bool {
+    /// - 이미 있는 항목을 바꿀 때만: 지우기 전에 임시 사본을 두고, 새 항목이 들어간 걸 확인한 뒤 사본을 지움
+    ///   → 중간에 앱이 꺼져도 다음 실행 때 recoverStaged 가 되살림. 없던 항목을 새로 넣을 때는 사본을 만들지 않음
+    /// - Face ID 가 등록된 폰에서는 생체인증 항목으로만 저장. 실패해도 보호 없는 항목으로 몰래 낮추지 않고 false
+    ///   (예외: 원래 보호 없는 항목이었으면 원래대로 되돌림 — 업데이트 직후 옮기기 실패. 낮아지는 것이 아님)
+    /// - Face ID 를 못 쓰는 폰(미등록·시뮬레이터)만 보호 없는 항목: 이 폰에서만, 잠금 해제 상태에서만 → 보낼 때 앱 비밀번호
+    private static func put(_ mnemonic: String, wallet: String, allowPlain: Bool = false) -> Bool {
         let data = Data(mnemonic.utf8), mark = fingerprint(mnemonic)
         let staging = query(wallet: wallet, staging: true)
-        _ = SecItemDelete(staging as CFDictionary)
-        var s = staging
-        s[kSecValueData as String] = data
-        s[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        guard SecItemAdd(s as CFDictionary, nil) == errSecSuccess else { return false }
-
-        let removed = SecItemDelete(query(wallet: wallet) as CFDictionary)
-        guard removed == errSecSuccess || removed == errSecItemNotFound else {
+        let before = attributes(wallet)
+        let wasPlain: Bool
+        switch before {
+        case .found(let label, _): wasPlain = label != bioLabel
+        case .protected: wasPlain = false
+        case .missing: wasPlain = false
+        case .error: return false   // 지금 있는 항목을 확인할 수 없으면 건드리지 않음
+        }
+        if case .missing = before {
+            // 바꿀 항목이 없음 → 사본 없이 바로 저장 (recoverStaged 가 쓰던 사본은 여기서 지우지 않음)
+        } else {
             _ = SecItemDelete(staging as CFDictionary)
-            return false
+            var s = staging
+            s[kSecValueData as String] = data
+            s[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            guard SecItemAdd(s as CFDictionary, nil) == errSecSuccess else { return false }
+            let removed = SecItemDelete(query(wallet: wallet) as CFDictionary)
+            guard removed == errSecSuccess || removed == errSecItemNotFound else {
+                _ = SecItemDelete(staging as CFDictionary)
+                return false
+            }
         }
         var ok = false
-        if biometryEnrolled, let access = bioAccess() {
+        let enrolled = biometryEnrolled
+        if enrolled, let access = bioAccess() {
             var q = query(wallet: wallet)
             q[kSecValueData as String] = data
             q[kSecAttrAccessControl as String] = access
@@ -506,8 +541,7 @@ enum WalletKeys {
             q[kSecAttrGeneric as String] = mark
             ok = SecItemAdd(q as CFDictionary, nil) == errSecSuccess
         }
-        if !ok {
-            // Face ID 를 못 쓰는 폰(미등록·시뮬레이터): 예전처럼 이 폰에서만, 잠금 해제 상태에서만 → 보낼 때 앱 비밀번호
+        if !ok && (!enrolled || wasPlain || allowPlain) {
             var q = query(wallet: wallet)
             q[kSecValueData as String] = data
             q[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
@@ -515,6 +549,7 @@ enum WalletKeys {
             q[kSecAttrGeneric as String] = mark
             ok = SecItemAdd(q as CFDictionary, nil) == errSecSuccess
         }
+        // 성공했을 때만 사본을 지움. 실패하면 사본이 남아 다음 실행 때 다시 시도 (savedKeyStatus 는 그동안 '지갑 없음'으로 보지 않음)
         if ok { _ = SecItemDelete(staging as CFDictionary) }
         return ok
     }
@@ -584,6 +619,12 @@ enum Biometry {
     }
 
     static func forget() { _ = SecItemDelete(query() as CFDictionary) }
+
+    /// 방금 인증에 쓴 등록 상태가 마지막으로 받아들인 상태와 같은지. 기록이 없으면 같지 않은 것으로 봄
+    static func isAccepted(_ state: Data?) -> Bool {
+        guard let state, let saved = stored() else { return false }
+        return saved == state
+    }
 
     private static func stored() -> Data? {
         var q = query()

@@ -1,10 +1,10 @@
-# Ouryn
+<p align="center">
+  <img src="assets/brand/ouryn-lockup-on-dark.svg" width="240" alt="Ouryn">
+</p>
 
-> **Your money. Actually yours.** — 내 돈의 새로운 일상.
+<p align="center"><b>Your money. Actually yours.</b> — 내 돈의 새로운 일상.</p>
 
 Ouryn은 은행 없이도 내 돈이 온전히 내 것이 되는 **자기수탁(self-custody) 암호화폐 지갑 iOS 앱**입니다. 코인 용어 대신 "내 돈 · 보내기 · 받기"로 말하는 쉬운 화면을 목표로, 스테이블코인(USDC·USDT)을 중심으로 7개 네트워크를 지원합니다.
-
-![Ouryn 브랜드 보드](docs/screenshots/ouryn-design-v1.png)
 
 > **⚠️ 상태: 개발 중 (베타)**
 > 보안 감사를 받지 않았고, 메인넷에서 실제 자금으로 입금·송금하는 검증은 아직 하지 않았습니다. 큰 금액을 넣지 마세요. 먼저 앱 안의 **테스트 통장(테스트넷)** 으로 시험하세요.
@@ -99,9 +99,17 @@ docs/             구현 검토, 스크린샷
 
 ## 디자인
 
-브랜드와 화면 목업(더미 데이터)은 [docs/screenshots](docs/screenshots)에 있습니다. 위 화면들은 실제 앱이 아니라 디자인 단계의 목업입니다.
+브랜드 에셋은 [assets/brand](assets/brand)에 있습니다.
 
-![디자인 목업](docs/screenshots/ouryn-calm-screens.png)
+| 파일 | 용도 |
+|---|---|
+| `ouryn-lockup.svg` | 기본 로고 (열린 O + 워드마크 + 태그라인) |
+| `ouryn-lockup-on-dark.svg` | 기본 로고를 어두운 바탕에 올린 버전. 밝은 페이지(README 등)용 |
+| `ouryn-symbol.svg` | 심볼(열린 O)만 |
+| `ouryn-wordmark.svg` | 심볼 + 워드마크 가로형 |
+| `ouryn-lockup-motion-highlight.svg` | 시작·완료 같은 모션 순간에만 쓰는 하이라이트 버전 |
+
+은색 로고라 흰 배경에서는 글자가 보이지 않습니다. 어두운 바탕에서 쓰세요. 초기 디자인 목업은 [docs/screenshots](docs/screenshots)에 남겨 두었지만, 카드·이자처럼 아직 만들지 않은 화면이 섞여 있어 이 README에는 싣지 않았습니다. 앱의 실제 모습은 위 [실제 앱 화면](#실제-앱-화면)을 보세요.
 
 ## 사용한 것
 

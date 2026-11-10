@@ -6,6 +6,7 @@ Use `ouryn-lockup.svg` for the final V5 standard vertical logo lockup. It uses t
 
 ## Supporting assets
 
+- `ouryn-lockup-on-dark.svg`: the primary lockup on a dark rounded background, for light pages such as the repository README. The silver wordmark is not legible on white.
 - `ouryn-symbol.svg`: final V5 symbol-only mark.
 - `ouryn-wordmark.svg`: final V5 horizontal symbol and wordmark.
 - `ouryn-lockup-motion-highlight.svg`: final V5 temporary highlighted lockup for motion moments such as launch, completion, or transitions. Do not use it as the default static logo.

@@ -30,6 +30,25 @@ Ouryn은 은행 없이도 내 돈이 온전히 내 것이 되는 **자기수탁(
 - **거래소에서 가져오기**: 출금을 신청하면 해당 자산의 실제 잔액 증가를 15초마다 확인해 도착을 알려 줍니다.
 - **결제 모드 / 'Ouryn 결제' 버튼**: 다이나믹 아일랜드(Live Activity)와 제어 센터·동작 버튼(iOS 18+)에서 바로 QR 찍기.
 
+## 실제 앱 화면
+
+실기기에서 찍은 화면입니다. 시험용으로 새로 만든 지갑과 테스트 통장이고, 복구 문구는 가렸습니다.
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/app/01-pin.png" width="180"><br><sub>간편 비밀번호</sub></td>
+    <td align="center"><img src="docs/screenshots/app/02-home-empty.png" width="180"><br><sub>빈 지갑 홈</sub></td>
+    <td align="center"><img src="docs/screenshots/app/03-home-testnet.png" width="180"><br><sub>테스트 통장 홈</sub></td>
+    <td align="center"><img src="docs/screenshots/app/04-accounts.png" width="180"><br><sub>지갑 · 통장</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/app/05-recovery-phrase-hidden.png" width="180"><br><sub>복구 문구 (누를 때만 표시)</sub></td>
+    <td align="center"><img src="docs/screenshots/app/06-receive-qr.png" width="180"><br><sub>받기 · 원형 QR</sub></td>
+    <td align="center"><img src="docs/screenshots/app/07-scan-result.png" width="180"><br><sub>QR 스캔 결과</sub></td>
+    <td align="center"><img src="docs/screenshots/app/08-address-book.png" width="180"><br><sub>주소록</sub></td>
+  </tr>
+</table>
+
 ## 보안 설계
 
 - 키는 영어 12단어(BIP39)로 만들고 **이 기기의 Keychain에만** 저장합니다 (`WhenUnlockedThisDeviceOnly` — iCloud 키체인·백업으로 나가지 않음). 서버로 보내지 않습니다.

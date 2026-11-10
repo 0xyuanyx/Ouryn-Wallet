@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/brand/ouryn-lockup-on-dark.svg" width="240" alt="Ouryn">
+  <img src="assets/brand/ouryn-lockup-on-dark.png" width="240" alt="Ouryn">
 </p>
 
 <p align="center"><b>Your money. Actually yours.</b> — 내 돈의 새로운 일상.</p>
@@ -104,7 +104,7 @@ docs/             구현 검토, 스크린샷
 | 파일 | 용도 |
 |---|---|
 | `ouryn-lockup.svg` | 기본 로고 (열린 O + 워드마크 + 태그라인) |
-| `ouryn-lockup-on-dark.svg` | 기본 로고를 어두운 바탕에 올린 버전. 밝은 페이지(README 등)용 |
+| `ouryn-lockup-on-dark.svg` · `.png` | 기본 로고를 어두운 바탕에 올린 버전. 밝은 페이지(README 등)용. README에는 선명하게 보이도록 960px PNG를 씁니다 |
 | `ouryn-symbol.svg` | 심볼(열린 O)만 |
 | `ouryn-wordmark.svg` | 심볼 + 워드마크 가로형 |
 | `ouryn-lockup-motion-highlight.svg` | 시작·완료 같은 모션 순간에만 쓰는 하이라이트 버전 |

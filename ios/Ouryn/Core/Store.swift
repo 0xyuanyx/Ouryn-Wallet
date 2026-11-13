@@ -394,6 +394,24 @@ final class Store: ObservableObject {
         markSlowDeposits()
     }
 
+    /// 당겨서 새로고침. 화면이 다시 그려지면서 당기기 작업이 취소돼도 조회는 끝까지 가도록 따로 돌리고,
+    /// 끝날 때까지 기다려서 그동안 위쪽 로딩이 유지되게 함. 자동 확인이 이미 돌고 있으면 그게 끝날 때까지 기다림.
+    func refresh() async {
+        await Task { [weak self] in
+            guard let self else { return }
+            let started = Date()
+            var waited = false
+            while await MainActor.run(body: { self.syncing }) && Date().timeIntervalSince(started) < 40 {
+                waited = true
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+            if !waited { await self.sync() }
+            // 너무 빨리 끝나도 로딩이 한 번은 보이게
+            let left = 0.6 - Date().timeIntervalSince(started)
+            if left > 0 { try? await Task.sleep(nanoseconds: UInt64(left * 1_000_000_000)) }
+        }.value
+    }
+
     /// 메인넷에서 잔액·시세 읽기
     func sync() async {
         let target: ChainAddrs? = await MainActor.run {
@@ -453,6 +471,8 @@ final class Store: ObservableObject {
         let finalStatuses = statuses, finalExpired = expired
         await MainActor.run {
             guard self.st.addrs == a, self.st.onboarded else { self.syncing = false; return }
+            // 중간에 취소된 조회는 '못 읽음'으로 남기지 않고 버림
+            if Task.isCancelled { self.syncing = false; return }
             if quotes != nil { self.lastPriceAt = Date() }
             let before = self.st
             self.apply(bal, quotes, requested: nets)
@@ -509,7 +529,7 @@ final class Store: ObservableObject {
             var ledger = s.networkBalances ?? [:]
             var dates = s.networkSynced ?? [:]
             var errors = s.networkErrors ?? [:]
-            for network in legacy.failed { errors[network] = "잔액 확인 실패" }
+            for network in legacy.failed { errors[network] = legacy.reasons[network] ?? "잔액 확인 실패" }
             // Legacy readers are display-only until converted to integer transport decoding.
             if let sol = legacy.solana {
                 ledger["솔라나"] = ["sol": String(format:"%.0f", sol.sol * 1e9), "usdc": String(format:"%.0f", sol.usdc * 1e6), "usdt": String(format:"%.0f", sol.usdt * 1e6)]
@@ -683,6 +703,31 @@ final class Store: ObservableObject {
             if !s.tx.contains(where:{ $0.id == tx.id }) { s.tx.insert(tx,at:0) }
             var saved = s.pendingBroadcasts ?? []; saved.removeAll { $0.id == pending.id && $0.network == pending.network }; saved.append(pending); s.pendingBroadcasts = saved
         }
+    }
+
+    /// 방금 보낸 거래 하나만 빠르게 확인 (보내기 완료 화면에서 몇 초마다). 끝나면 잔액도 한 번 다시 읽음
+    func checkSent(_ id: String) async {
+        guard let tx = await MainActor.run(body: { self.st.tx.first { $0.id == id } }), tx.inFlight, !tx.hash.isEmpty,
+              let n = WalletNetwork(rawValue: tx.network) else { return }
+        let status: TxStatus?
+        switch n {
+        case .tron: status = try? await TronTransfer.status(tx.hash)
+        case .solana: status = try? await SolanaTransferEngine.status(tx.hash)
+        case .bitcoin: status = try? await BitcoinTransfer.status(tx.hash)
+        case .cardano: status = try? await CardanoTransfer.status(tx.hash)
+        default: status = try? await EVMTransfer.status(tx.hash, network: n)
+        }
+        guard let status, status == .done || status == .failed else { return }
+        await MainActor.run {
+            self.update { s in
+                guard let i = s.tx.firstIndex(where: { $0.id == id }), s.tx[i].inFlight else { return }
+                s.tx[i].status = status
+                if s.tx[i].via == "전파 확인 중" { s.tx[i].via = "전파 완료" }
+                let hash = s.tx[i].hash, net = s.tx[i].network
+                s.pendingBroadcasts?.removeAll { $0.id == hash && $0.network == net }
+            }
+        }
+        await sync()
     }
 
     // MARK: 기타

@@ -244,7 +244,7 @@ struct ReceiveView: View {
             .padding(.horizontal, 24)
             .padding(.bottom, 24)
         }
-        .refreshable { await store.sync() }
+        .refreshable { await store.refresh() }
     }
 }
 

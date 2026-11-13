@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import WalletCore
 
 enum SolanaTransferEngine {
@@ -58,24 +59,45 @@ enum SolanaTransferEngine {
 extension WalletKeys {
  static func signSolana(_ quote:TransferQuote) throws -> SignedTransfer {
   guard quote.network == .solana, quote.expires > Date(), let wallet = signingWallet(), WalletKeys.signingAddress(wallet,.solana) == quote.owner,
-   let amount = UInt64(quote.raw), let blockhash = quote.draft["blockhash"] as? String else { throw TransferError.invalid("확인이 만료됐거나 지갑을 열 수 없어요") }
+   let amount = UInt64(quote.raw), let blockhash = quote.draft["blockhash"] as? String,
+   let ownerKey = Base58.decodeNoCheck(string:quote.owner), let blockKey = Base58.decodeNoCheck(string:blockhash) else { throw TransferError.invalid("확인이 만료됐거나 지갑을 열 수 없어요") }
+  let create = quote.draft["create"] as? Bool == true
+  let expected: SolanaEvidence.Transfer
+  let token: (mint:String, from:String, to:String)?
+  if quote.asset == "sol" {
+   guard let to = Base58.decodeNoCheck(string:quote.recipient) else { throw TransferError.invalid("받는 솔라나 주소를 확인해주세요") }
+   expected = .sol(to:to,lamports:amount); token = nil
+  } else {
+   // 토큰 계정은 견적에 적힌 값을 그대로 쓰지 않고 여기서 다시 계산해 같은지 확인
+   guard let mint = MINTS[quote.asset], let from = quote.draft["senderToken"] as? String, let to = quote.draft["recipientToken"] as? String,
+         from == SolanaAddress(string:quote.owner)?.defaultTokenAddress(tokenMintAddress:mint),
+         to == SolanaAddress(string:quote.recipient)?.defaultTokenAddress(tokenMintAddress:mint),
+         let mintKey = Base58.decodeNoCheck(string:mint), let fromKey = Base58.decodeNoCheck(string:from),
+         let toKey = Base58.decodeNoCheck(string:to), let walletKey = Base58.decodeNoCheck(string:quote.recipient)
+   else { throw TransferError.invalid("토큰 계정을 확인하지 못했어요") }
+   expected = .token(mint:mintKey,from:fromKey,to:toKey,wallet:walletKey,amount:amount,decimals:6,create:create); token = (mint,from,to)
+  }
   let input = SolanaSigningInput.with {
    $0.privateKey = WalletKeys.signingKey(wallet,.solana).data; $0.recentBlockhash = blockhash
-   if quote.asset == "sol" { $0.transferTransaction = SolanaTransfer.with { $0.recipient = quote.recipient; $0.value = amount } }
-   else if quote.draft["create"] as? Bool == true {
+   if let token, create {
     $0.createAndTransferTokenTransaction = SolanaCreateAndTransferToken.with {
-     $0.recipientMainAddress = quote.recipient; $0.tokenMintAddress = MINTS[quote.asset]!
-     $0.senderTokenAddress = quote.draft["senderToken"] as! String; $0.recipientTokenAddress = quote.draft["recipientToken"] as! String; $0.amount = amount; $0.decimals = 6
+     $0.recipientMainAddress = quote.recipient; $0.tokenMintAddress = token.mint
+     $0.senderTokenAddress = token.from; $0.recipientTokenAddress = token.to; $0.amount = amount; $0.decimals = 6
     }
-   } else {
+   } else if let token {
     $0.tokenTransferTransaction = SolanaTokenTransfer.with {
-     $0.tokenMintAddress = MINTS[quote.asset]!; $0.senderTokenAddress = quote.draft["senderToken"] as! String; $0.recipientTokenAddress = quote.draft["recipientToken"] as! String; $0.amount = amount; $0.decimals = 6
+     $0.tokenMintAddress = token.mint; $0.senderTokenAddress = token.from; $0.recipientTokenAddress = token.to; $0.amount = amount; $0.decimals = 6
     }
-   }
+   } else { $0.transferTransaction = SolanaTransfer.with { $0.recipient = quote.recipient; $0.value = amount } }
   }
   let output:SolanaSigningOutput = AnySigner.sign(input:input,coin:.solana)
-  guard output.error == .ok, let bytes = Base58.decodeNoCheck(string:output.encoded), bytes.count > 65, bytes.first == 1 else { throw TransferError.invalid("서명 검증에 실패했어요") }
-  let id = Base58.encodeNoCheck(data:Data(bytes[1..<65]))
+  // 서명된 바이트를 다시 읽어서 보내는 사람·블록·지시(받는 곳, 토큰, 수량)가 견적과 정확히 같은지, 서명이 맞는지 확인
+  guard output.error == .ok, let bytes = Base58.decodeNoCheck(string:output.encoded), let evidence = try? SolanaEvidence.parse(bytes),
+        evidence.matches(owner:ownerKey,blockhash:blockKey,transfer:expected),
+        let signer = try? CryptoKit.Curve25519.Signing.PublicKey(rawRepresentation:ownerKey),
+        signer.isValidSignature(evidence.signatures[0],for:evidence.message)
+  else { throw TransferError.invalid("서명 검증에 실패했어요") }
+  let id = Base58.encodeNoCheck(data:evidence.signatures[0])
   return SignedTransfer(id:id,payload:["encoded":output.encoded])
  }
 }

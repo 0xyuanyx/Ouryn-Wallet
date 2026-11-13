@@ -35,6 +35,8 @@ enum ChainAPI {
         var eth: Double?
         var btc: Double?
         var cardano: CardanoBal?
+        /// 못 읽은 이유 (네트워크 이름 → 한 줄)
+        var reasons: [String: String] = [:]
         var failed: [String] {
             var f: [String] = []
             if solana == nil { f.append("솔라나") }
@@ -50,22 +52,60 @@ enum ChainAPI {
     // MARK: 잔액
 
     static func balances(_ a: ChainAddrs, only nets: Set<String>) async -> Balances {
-        async let s = solana(a.solana, on: nets.contains("솔라나"))
-        async let e = ethereum(a.ethereum, on: nets.contains("이더리움"))
-        async let b = bitcoin(a.bitcoin, on: nets.contains("비트코인"))
-        async let c = cardano(a.cardano, on: nets.contains("카르다노"))
-        return await Balances(solana: s, eth: e, btc: b, cardano: c)
+        async let s = attempt(nets.contains("솔라나")) { try await readSolana(a.solana) }
+        async let e = attempt(nets.contains("이더리움")) { try await readEthereum(a.ethereum) }
+        async let b = attempt(nets.contains("비트코인")) { try await readBitcoin(a.bitcoin) }
+        async let c = attempt(nets.contains("카르다노")) { try await readCardano(a.cardano) }
+        let (sv, ev, bv, cv) = await (s, e, b, c)
+        var out = Balances(solana: sv.0, eth: ev.0, btc: bv.0, cardano: cv.0)
+        for (net, why) in [("솔라나", sv.1), ("이더리움", ev.1), ("비트코인", bv.1), ("카르다노", cv.1)] {
+            if let why { out.reasons[net] = why }
+        }
+        return out
+    }
+
+    /// 꺼진 체인은 (nil, nil), 실패하면 (nil, 이유)
+    private static func attempt<T>(_ on: Bool, _ job: () async throws -> T) async -> (T?, String?) {
+        guard on else { return (nil, nil) }
+        do { return (try await job(), nil) } catch { return (nil, reason(error)) }
+    }
+
+    /// 화면에 보여줄 실패 이유 한 줄
+    static func reason(_ error: Error) -> String {
+        if let h = error as? HTTPError {
+            switch h.code {
+            case 429: return "서버가 요청이 많다고 잠시 막았어요 (429)"
+            case -2: return "서버가 요청을 거절했어요"
+            case -3: return "서버 응답을 읽지 못했어요"
+            case 500...: return "서버 오류 (\(h.code))"
+            case 1..<500: return "서버가 요청을 받지 않았어요 (\(h.code))"
+            default: return "서버에 연결하지 못했어요"
+            }
+        }
+        if let u = error as? URLError {
+            switch u.code {
+            case .timedOut: return "서버 응답이 너무 늦어요"
+            case .notConnectedToInternet, .networkConnectionLost: return "인터넷 연결을 확인해주세요"
+            case .cancelled: return "확인이 중간에 멈췄어요"
+            default: return "서버에 연결하지 못했어요"
+            }
+        }
+        if let t = error as? TransferError, case .invalid(let m) = t { return m }
+        if error is DecodingError || (error as NSError).domain == NSCocoaErrorDomain { return "서버 응답을 읽지 못했어요" }
+        return "서버에 연결하지 못했어요"
     }
 
     static func solana(_ addr: String, on: Bool = true) async -> SolanaBal? {
         guard on else { return nil }
-        do {
-            let r = try await rpc(solanaRPC, "getBalance", [addr])
-            let lamports = num(dig(r, "value")) ?? 0
-            async let usdc = splToken(addr, MINTS["usdc"] ?? "")
-            async let usdt = splToken(addr, MINTS["usdt"] ?? "")
-            return try await SolanaBal(sol: lamports / 1e9, usdc: usdc, usdt: usdt)
-        } catch { return nil }
+        return try? await readSolana(addr)
+    }
+
+    private static func readSolana(_ addr: String) async throws -> SolanaBal {
+        let r = try await rpc(solanaRPC, "getBalance", [addr])
+        let lamports = num(dig(r, "value")) ?? 0
+        async let usdc = splToken(addr, MINTS["usdc"] ?? "")
+        async let usdt = splToken(addr, MINTS["usdt"] ?? "")
+        return try await SolanaBal(sol: lamports / 1e9, usdc: usdc, usdt: usdt)
     }
 
     private static func splToken(_ owner: String, _ mint: String) async throws -> Double {
@@ -80,13 +120,23 @@ enum ChainAPI {
 
     static func ethereum(_ addr: String, on: Bool = true) async -> Double? {
         guard on else { return nil }
-        guard let r = try? await rpc(ethRPC, "eth_getBalance", [addr, "latest"]), let hex = r as? String else { return nil }
-        return hexToDouble(hex).map { $0 / 1e18 }
+        return try? await readEthereum(addr)
+    }
+
+    private static func readEthereum(_ addr: String) async throws -> Double {
+        let r = try await rpc(ethRPC, "eth_getBalance", [addr, "latest"])
+        guard let hex = r as? String, let v = hexToDouble(hex) else { throw HTTPError(code: -3) }
+        return v / 1e18
     }
 
     static func bitcoin(_ addr: String, on: Bool = true) async -> Double? {
         guard on else { return nil }
-        guard let data = try? await BitcoinTransfer.get("/address/" + addr), let j = try? JSONSerialization.jsonObject(with:data) as? [String:Any] else { return nil }
+        return try? await readBitcoin(addr)
+    }
+
+    private static func readBitcoin(_ addr: String) async throws -> Double {
+        let data = try await BitcoinTransfer.get("/address/" + addr)
+        guard let j = try JSONSerialization.jsonObject(with:data) as? [String:Any] else { throw HTTPError(code: -3) }
         func part(_ k: String) -> Double {
             (num(dig(j, k, "funded_txo_sum")) ?? 0) - (num(dig(j, k, "spent_txo_sum")) ?? 0)
         }
@@ -96,23 +146,25 @@ enum ChainAPI {
 
     static func cardano(_ addr: String, on: Bool = true) async -> CardanoBal? {
         guard on else { return nil }
-        do {
-            let body = ["_addresses": [addr]]
-            async let infoJ = post(URL(string: koios + "address_info")!, body)
-            async let assetsJ = post(URL(string: koios + "address_assets")!, body)
-            let info = try await infoJ as? [Any] ?? []
-            let lovelace = info.first.flatMap { Double(dig($0, "balance") as? String ?? "") } ?? 0 // 한 번도 안 쓴 주소는 빈 배열
-            let assets = try await assetsJ as? [Any] ?? []
-            var night = 0.0
-            for row in assets {
-                guard dig(row, "policy_id") as? String == nightPolicy,
-                      dig(row, "asset_name") as? String == nightName else { continue }
-                let q = Double(dig(row, "quantity") as? String ?? "") ?? 0
-                let dec = num(dig(row, "decimals")) ?? 6
-                night += q / pow(10, dec)
-            }
-            return CardanoBal(ada: lovelace / 1e6, night: night)
-        } catch { return nil }
+        return try? await readCardano(addr)
+    }
+
+    private static func readCardano(_ addr: String) async throws -> CardanoBal {
+        let body = ["_addresses": [addr]]
+        async let infoJ = post(URL(string: koios + "address_info")!, body)
+        async let assetsJ = post(URL(string: koios + "address_assets")!, body)
+        let info = try await infoJ as? [Any] ?? []
+        let lovelace = info.first.flatMap { Double(dig($0, "balance") as? String ?? "") } ?? 0 // 한 번도 안 쓴 주소는 빈 배열
+        let assets = try await assetsJ as? [Any] ?? []
+        var night = 0.0
+        for row in assets {
+            guard dig(row, "policy_id") as? String == nightPolicy,
+                  dig(row, "asset_name") as? String == nightName else { continue }
+            let q = Double(dig(row, "quantity") as? String ?? "") ?? 0
+            let dec = num(dig(row, "decimals")) ?? 6
+            night += q / pow(10, dec)
+        }
+        return CardanoBal(ada: lovelace / 1e6, night: night)
     }
 
     // MARK: 시세 (원화)

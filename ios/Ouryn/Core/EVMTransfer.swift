@@ -61,7 +61,12 @@ extension WalletKeys {
    }
   }
   let output:EthereumSigningOutput = AnySigner.sign(input:input,coin:.ethereum)
-  guard output.error == .ok, !output.encoded.isEmpty else { throw TransferError.invalid("서명 검증에 실패했어요") }
+  // 서명된 바이트를 다시 읽어서 체인·nonce·수수료·받는 곳·수량이 견적과 같은지 확인
+  guard output.error == .ok, !output.encoded.isEmpty, let evidence = try? EVMEvidence.parse(output.encoded),
+        let recipient = EVMEvidence.address(quote.recipient),
+        evidence.matches(chainID:UInt64(quote.network.chainID!),nonce:nonceData,gasPrice:priceData,gasLimit:gasData,
+                         contract:quote.network.contract(quote.asset).flatMap(EVMEvidence.address),recipient:recipient,amount:amountData)
+  else { throw TransferError.invalid("서명 검증에 실패했어요") }
   let id = "0x" + Hash.keccak256(data:output.encoded).hexString
   return SignedTransfer(id:id,payload:["encoded":"0x" + output.encoded.hexString])
  }

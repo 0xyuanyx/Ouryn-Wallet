@@ -127,9 +127,9 @@ struct HomeView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 32)
             }
-            // 아래로 당기면 메인넷에서 잔액 다시 읽기
+            // 아래로 당기면 잔액 다시 읽기 (읽는 동안 위쪽 로딩 유지)
             .refreshable {
-                await store.sync()
+                await store.refresh()
             }
         }
         .background(C.bg.ignoresSafeArea())
@@ -239,25 +239,52 @@ extension HomeView {
     }
 }
 
-/// 마지막으로 잔액을 읽은 때 · 실패한 네트워크
+/// 마지막으로 잔액을 읽은 때 · 실패한 네트워크 (누르면 이유)
 private struct SyncLine: View {
     @EnvironmentObject var store: Store
+    @State private var open = false
+
+    private func label(_ net: String) -> String {
+        guard let n = WalletNetwork(rawValue: net) else { return net }
+        return Testnet.on ? Testnet.name(n) : n.rawValue
+    }
 
     var body: some View {
         let st = store.st
-        HStack(spacing: 6) {
-            if store.syncing {
-                ProgressView().scaleEffect(0.6).frame(width: 12, height: 12).tint(C.mute)
-                TX("잔액 확인 중", .r, 12, C.mute)
-            } else if !st.syncFailed.isEmpty {
-                Icon("cloud-offline-outline", 13, C.amber)
-                TX("잔액을 못 읽었어요 · 당겨서 다시", .r, 12, C.amber, lines: 1)
-            } else if let t = st.lastSync {
-                Icon("checkmark-circle-outline", 13, C.mute)
-                TX(Date().timeIntervalSince(t) < 60 ? "방금 확인한 잔액이에요" : "\(relTime(t)) 확인한 잔액이에요", .r, 12, C.mute)
+        let failed = st.syncFailed
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                if store.syncing {
+                    ProgressView().scaleEffect(0.6).frame(width: 12, height: 12).tint(C.mute)
+                    TX("잔액 확인 중", .r, 12, C.mute)
+                } else if !failed.isEmpty {
+                    Icon("cloud-offline-outline", 13, C.amber)
+                    TX("\(label(failed[0]))\(failed.count > 1 ? " 외 \(failed.count - 1)곳" : "") 잔액을 못 읽었어요 · 당겨서 다시", .r, 12, C.amber, lines: 1)
+                    Icon(open ? "chevron-up" : "chevron-down", 12, C.amber)
+                } else if let t = st.lastSync {
+                    Icon("checkmark-circle-outline", 13, C.mute)
+                    TX(Date().timeIntervalSince(t) < 60 ? "방금 확인한 잔액이에요" : "\(relTime(t)) 확인한 잔액이에요", .r, 12, C.mute)
+                }
+            }
+            .frame(height: 16)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                guard !store.syncing, !failed.isEmpty else { return }
+                haptic(.select)
+                withAnimation(.easeOut(duration: 0.2)) { open.toggle() }
+            }
+            if open && !store.syncing && !failed.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(failed, id: \.self) { net in
+                        TX("\(label(net)) · \(st.networkErrors?[net] ?? "잔액 확인 실패")", .r, 12, C.sub, lines: 2)
+                    }
+                    TX("이전에 읽은 잔액을 그대로 보여주고 있어요", .r, 12, C.mute, lines: 1)
+                }
+                .padding(.leading, 19)
+                .transition(.opacity)
             }
         }
-        .frame(height: 16)
+        .onChange(of: failed.isEmpty) { _, empty in if empty { open = false } }
     }
 }
 

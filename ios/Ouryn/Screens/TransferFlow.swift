@@ -48,6 +48,7 @@ struct TransferFlow: View {
  @State private var offerWords = false // Face ID 로 못 열었을 때 '12단어로 보내기' 버튼
  @State private var netKey = ""        // 0x 주소에서 사용자가 확인한 네트워크 ("주소|네트워크")
  @State private var selfOK = false     // 내 주소로 보내는 게 맞다고 확인했는지
+ @State private var uncertain = false  // 전파 응답을 못 받음 (갔을 수 있음)
 
  private var recent: [Tx] { recentSends(store.st, limit: 8) }
  private var detected: [WalletNetwork] { WalletNetwork.detect(to) }
@@ -94,7 +95,7 @@ struct TransferFlow: View {
      if let hash { doneView(hash) }
      else if let quote { quoteView(quote) }
      else { form }
-     if !error.isEmpty { TX(error, .r, 14, C.red, lh: 20).padding(.top, 12) }
+     if !error.isEmpty && hash == nil { TX(error, .r, 14, C.red, lh: 20).padding(.top, 12) }
     }
     .padding(.horizontal, 24)
     .padding(.top, 8)
@@ -515,19 +516,24 @@ struct TransferFlow: View {
  }
 
  @ViewBuilder private func doneView(_ hash: String) -> some View {
-  VStack(alignment: .leading, spacing: 12) {
-   TX("전송 확인", .b, 26)
-   TX("네트워크 확인 중이에요", .sb, 20)
-   TX("앱을 다시 열어도 거래 해시로 확인해요", .r, 14, C.sub)
-   TX(hash, .r, 12, C.sub).textSelection(.enabled)
+  VStack(alignment: .leading, spacing: 0) {
+   if let quote {
+    SendProgressView(quote: quote, hash: hash, uncertain: uncertain)
+   }
    if store.st.nameOf(to, net: network.rawValue) == nil {
-    TX("주소록에 저장", .sb, 13, C.sub).padding(.top, 12)
-    Field(text: $name, placeholder: "이 주소의 이름 (예: 민수, 업비트)", maxLength: 12)
+    TX("주소록에 저장", .sb, 13, C.sub).padding(.top, 24)
+    Field(text: $name, placeholder: "이 주소의 이름 (예: 민수, 업비트)", maxLength: 12).padding(.top, 8)
     OButton("주소록에 저장", kind: .secondary, disabled: name.trimmingCharacters(in: .whitespaces).isEmpty) {
      store.saveRecipient(network: network.rawValue, address: to, name: name); toast("주소록에 저장했어요")
     }
+    .padding(.top, 8)
    }
-   OButton("내역에서 확인") { dismiss(); router.tab = .history }.padding(.top, 8)
+   OButton("확인") { dismiss() }.padding(.top, 24)
+   OButton("거래 상세 보기", kind: .secondary) {
+    let id = network.rawValue + hash
+    dismiss(); after(0.35) { router.push(.txDetail(id)) }
+   }
+   .padding(.top, 8)
   }
  }
 
@@ -659,7 +665,7 @@ struct TransferFlow: View {
     try await TransferDispatcher.broadcast(signed, network: quoted.network)
     store.update { state in if let i = state.tx.firstIndex(where: { $0.hash == signed.id && $0.network == quoted.network.rawValue }) { state.tx[i].via = "전파 완료" } }
    }
-   catch { self.error = "전파 응답이 불확실해요. 거래 해시로 확인 중이며 다시 보내지 마세요" }
+   catch { uncertain = true }
    await store.sync()
   } catch { self.error = error.localizedDescription }
  }
